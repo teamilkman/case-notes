@@ -166,6 +166,8 @@ const app = createApp({
     // APK manual update entry (no JS bridge): a same-host sentinel navigation is
     // consumed by the shell, which runs the check and reports back natively.
     checkUpdate:()=>{location.assign('https://'+location.host+'/__app__/check-update');},
+    // Browser-side APK download entry (hidden inside the shell itself).
+    downloadApk:()=>{if(!window.open('https://github.com/teamilkman/case-notes/releases/tag/android-latest','_blank'))location.assign('https://github.com/teamilkman/case-notes/releases/tag/android-latest');},
     navigate:view=>navigation.openView(view),
     swiped:view=>navigation.swiped(view),
     pageSettled:()=>navigation.settled(),
