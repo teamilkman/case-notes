@@ -87,7 +87,11 @@ jobs:
             adb shell svc wifi disable || true
             adb shell svc data disable || true
             adb shell cmd connectivity airplane-mode enable || true
-            gradle :app:connectedDebugAndroidTest --project-dir android
+            adb logcat -c
+            gradle :app:connectedDebugAndroidTest --project-dir android; code=$?
+            # The action's own capture window is too narrow; keep the whole system log.
+            adb logcat -d > android/app/build/outputs/androidTest-results/connected/full-logcat.txt || true
+            exit $code
       - name: Record the offline check verdict
         id: verdict
         if: always()
@@ -113,12 +117,19 @@ jobs:
             echo "===== $file"
             tail -n 120 "$file"
           done
+          if [ -f android/app/build/outputs/androidTest-results/connected/full-logcat.txt ]; then
+            echo "===== full logcat (crash/FATAL/test lines)"
+            grep -E 'FATAL|SIGSEGV|SIGTRAP|SIGABRT|Render process|Process crashed|Force finishing|AndroidRuntime|OfflineShellTest|casenotes.*(died|crash)' \
+              android/app/build/outputs/androidTest-results/connected/full-logcat.txt | tail -n 80 || true
+          fi
       - name: Preserve isolated Android failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: android-offline-failure
-          path: android/app/build/outputs/androidTest-results/
+          path: |
+            android/app/build/outputs/androidTest-results/
+            android/app/build/outputs/androidTest-results/connected/full-logcat.txt
           if-no-files-found: ignore
       - name: Decode signing keystore
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
