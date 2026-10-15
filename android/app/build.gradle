@@ -1,0 +1,65 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.teamilkman.casenotes'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.teamilkman.casenotes'
+        minSdk 24
+        targetSdk 34
+        // 套壳版本号：发新包时同步递增 versionCode，versionName 对外展示。
+        versionCode 7
+        versionName '2.1.1'
+    }
+
+    signingConfigs {
+        release {
+            storeFile file(System.getenv("KEYSTORE_PATH") ?: "release.keystore")
+            storePassword System.getenv("ANDROID_STORE_PASSWORD")
+            keyAlias System.getenv("ANDROID_KEY_ALIAS")
+            keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (System.getenv("KEYSTORE_PATH") && System.getenv("ANDROID_STORE_PASSWORD")
+                    && System.getenv("ANDROID_KEY_ALIAS") && System.getenv("ANDROID_KEY_PASSWORD")) {
+                signingConfig signingConfigs.release
+            }
+        }
+        debug {
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    sourceSets.main.assets.srcDir("$buildDir/generated/shellAssets")
+
+    testOptions {
+        unitTests {
+            // The shell test reads the merged assets the APK ships.
+            includeAndroidResources = true
+        }
+    }
+}
+
+tasks.register('prepareShell', Exec) {
+    workingDir rootProject.projectDir.parentFile
+    commandLine 'node', 'tools/pack-android-shell.mjs'
+    inputs.dir(new File(rootProject.projectDir, '../public'))
+    inputs.files(new File(rootProject.projectDir, '../tools/pack-android-shell.mjs'), new File(rootProject.projectDir, '../tools/vendor-dexie.mjs'), new File(rootProject.projectDir, '../package-lock.json'))
+    outputs.dir("$buildDir/generated/shellAssets")
+}
+tasks.named('preBuild').configure { dependsOn 'prepareShell' }
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.17'
+}

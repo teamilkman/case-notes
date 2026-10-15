@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- windowLightNavigationBar 自 API 27 起可用：白色导航栏（home 键区域）配深色系统图标。 -->
+    <style name="Theme.CaseNotes" parent="Theme.CaseNotes.Base">
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

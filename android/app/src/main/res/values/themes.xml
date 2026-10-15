@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 浅色主题：系统状态栏、导航栏取网页头部/底部标签栏的白色，并用深色系统图标，避免白图标落在浅色底上不可见。 -->
+    <style name="Theme.CaseNotes.Base" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorPrimary">@color/brand</item>
+    </style>
+
+    <style name="Theme.CaseNotes" parent="Theme.CaseNotes.Base" />
+</resources>

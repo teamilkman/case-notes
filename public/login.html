@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>案记 · 登录</title>
+<meta name="theme-color" content="#f4f6f3">
+<link rel="icon" href="/web/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/theme.css">
+<link rel="stylesheet" href="/login.css">
+</head>
+<body>
+<main class="login-layout">
+  <section class="login-story" aria-label="案记">
+    <div class="login-brand"><img src="/web/logo.svg" alt=""><span>案记</span></div>
+    <p class="login-eyebrow">个人工作空间</p>
+    <h1>案件与日程，<br>一目了然。</h1>
+    <p class="login-description">记录案件进展，整理待办事项，<br>为每一次开庭做好安排。</p>
+    <div class="login-topics"><span>工作记录</span><i></i><span>待办事项</span><i></i><span>开庭日程</span></div>
+    <svg class="login-art" viewBox="0 0 340 180" fill="none" aria-hidden="true"><rect x="36" y="30" width="205" height="130" rx="12" fill="#e4ede5"/><rect x="72" y="10" width="205" height="130" rx="12" fill="#f4f7f1" stroke="#c2d5c7"/><path d="M94 40h69M94 59h157M94 80h157M94 101h104" stroke="#a9c2b0" stroke-width="3" stroke-linecap="round"/><rect x="225" y="89" width="65" height="65" rx="16" fill="#306a58"/><path d="M242 122l10 10 22-25" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </section>
+  <section class="login-card" aria-labelledby="login-title">
+    <span class="login-lock" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="6" y="10" width="12" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></span>
+    <h2 id="login-title">欢迎回来</h2>
+    <p class="login-tip">输入访问密码，继续你的工作</p>
+    <form id="login-form">
+      <label for="pwd">访问密码</label>
+      <div class="password-field"><input id="pwd" name="password" type="password" autocomplete="current-password" required aria-describedby="err" placeholder="请输入访问密码"><button id="toggle-password" type="button" aria-label="显示密码" aria-pressed="false">显示</button></div>
+      <div class="err" id="err" role="alert" aria-live="polite"></div>
+      <button class="login-submit" id="btn" type="submit"><span class="login-submit-label">进入工作空间</span><span class="login-submit-arrow" aria-hidden="true">→</span></button>
+    </form>
+    <p class="login-footer">私人日志 · 仅授权访问</p>
+  </section>
+</main>
+<script type="module" src="/login.js"></script>
+</body>
+</html>

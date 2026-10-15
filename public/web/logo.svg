@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- 案记 · 系统LOGO:天平(法律)+ 案台双线(日志/案卷)。
+       与 scripts 生成的 favicon.ico/web/logo.png 同几何(碗形吊盘 210°–330°)。 -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#306a58"/>
+      <stop offset="1" stop-color="#43826c"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <!-- 主体经中心缩放 0.8，四周留白，避免在启动器/桌面图标中贴边 -->
+  <g transform="translate(256 256) scale(0.8) translate(-256 -256)">
+  <g stroke="#fff" fill="none" stroke-linecap="round">
+    <!-- 顶环点 -->
+    <circle cx="256" cy="120" r="16" fill="#fff" stroke="none"/>
+    <!-- 横梁与中柱 -->
+    <path d="M140 170 H372" stroke-width="30"/>
+    <path d="M256 138 V356" stroke-width="30"/>
+    <!-- 吊绳:梁端挂载点 → 盘两端吊点(外绳 + 内绳,构成三角吊挂) -->
+    <path d="M140 172 L80 268" stroke-width="18"/>
+    <path d="M372 172 L432 268" stroke-width="18"/>
+    <path d="M140 172 L200 268" stroke-width="18"/>
+    <path d="M372 172 L312 268" stroke-width="18"/>
+    <!-- 吊盘:浅碗弧(r=75,下弯深度 30px;sweep=0 large=0 经下方,开口向上) -->
+    <path d="M80 268 A75 75 0 0 0 200 268" stroke-width="22"/>
+    <path d="M312 268 A75 75 0 0 0 432 268" stroke-width="22"/>
+    <!-- 案台双线(底座) -->
+    <path d="M212 356 H300" stroke-width="26"/>
+    <path d="M188 392 H324" stroke-width="30"/>
+  </g>
+  </g>
+</svg>

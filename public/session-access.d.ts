@@ -1,0 +1,1 @@
+export function createSessionAccess(options:{verify:()=>Promise<any>;persistence:import('./persistent-cache.js').PersistentCache;state:{offline:boolean;authRequired?:boolean};now?:()=>number;onVerified?:()=>void;onUnauthorized?:()=>void|Promise<void>}):{ensure(force?:boolean):Promise<void>;close():void};

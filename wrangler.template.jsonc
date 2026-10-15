@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "case-notes",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "${DOMAIN}",
+      "custom_domain": true,
+      "zone_id": "${ZONE_ID}"
+    }
+  ],
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": [
+      "/api/*",
+      "/mcp",
+      "/health",
+      "/oauth/*",
+      "/.well-known/*"
+    ]
+  },
+  "vars": {
+    "WORKSPACE_ID": "personal",
+    "API_CLIENT_ID": "ai-default"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "case-notes",
+      "database_id": "${D1_DATABASE_ID}",
+      "preview_database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "migrations/business"
+    }
+  ]
+}

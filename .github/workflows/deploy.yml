@@ -1,0 +1,83 @@
+name: Check and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: case-notes-production
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL }}
+      DOMAIN: ${{ secrets.DOMAIN }}
+      ZONE_ID: ${{ secrets.ZONE_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      REQUIRE_DEPLOYMENT_CONFIG: "1"
+      WEB_PASSWORD: ${{ secrets.WEB_PASSWORD }}
+      API_TOKEN: ${{ secrets.CASE_NOTES_API_TOKEN }}
+    steps:
+      - name: Check deployment credentials
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing CLOUDFLARE_API_TOKEN'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Missing CLOUDFLARE_ACCOUNT_ID'; exit 1; }
+          test -n "$DEPLOYMENT_URL" || { echo 'Missing DEPLOYMENT_URL'; exit 1; }
+          test -n "$DOMAIN" || { echo 'Missing DOMAIN'; exit 1; }
+          test -n "$ZONE_ID" || { echo 'Missing ZONE_ID'; exit 1; }
+          test -n "$D1_DATABASE_ID" || { echo 'Missing D1_DATABASE_ID'; exit 1; }
+          test -n "$WEB_PASSWORD" || { echo 'Missing WEB_PASSWORD'; exit 1; }
+          test -n "$API_TOKEN" || { echo 'Missing CASE_NOTES_API_TOKEN'; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Render deployment configuration
+        run: node tools/render-wrangler.mjs
+      - name: Verify Cloudflare credential access
+        run: node tools/check-cloudflare-token.mjs
+      - name: Apply schema migrations
+        run: npx wrangler d1 migrations apply case-notes --remote
+      - name: Transfer verified project data
+        run: npx tsx tools/rename-resources.ts
+      - name: Prepare deployment before domain cutover
+        run: npx tsx tools/rename-resources.ts --stage-config
+      - name: Configure runtime secrets
+        run: |
+          node -e 'process.stdout.write(JSON.stringify({WEB_PASSWORD:process.env.WEB_PASSWORD,API_TOKEN:process.env.API_TOKEN}))' | npx wrangler secret bulk --config .wrangler/staged-worker.json
+      - name: Deploy Worker
+        run: npm run deploy -- --config .wrangler/staged-worker.json
+      - name: Verify transferred business facts before cutover
+        run: npx tsx tools/rename-resources.ts --verify
+      - name: Verify or bind custom domain
+        run: node tools/bind-domain.mjs
+      - name: Verify live service
+        run: node tools/check-deployment.mjs
+      - name: Retire verified source resources
+        run: npx tsx tools/rename-resources.ts --retire

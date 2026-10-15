@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自适应图标前景：白色天平+案台双线，与 logo.xml 同几何，整体缩到 108dp 画布的安全区内（约 0.67），
+     由启动器蒙版裁剪，不再出现旧式图标的白底留边。主体相对旧版再缩小 0.8，四周留白，避免贴边。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <group
+        android:pivotX="256"
+        android:pivotY="256"
+        android:scaleX="0.67"
+        android:scaleY="0.67">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M256,104 m-16,0 a16,16 0 1,0 32,0 a16,16 0 1,0 -32,0" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="30"
+            android:strokeLineCap="round"
+            android:pathData="M140,170 H372" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="30"
+            android:strokeLineCap="round"
+            android:pathData="M256,138 V356" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="18"
+            android:strokeLineCap="round"
+            android:pathData="M140,172 L80,268" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="18"
+            android:strokeLineCap="round"
+            android:pathData="M372,172 L432,268" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="18"
+            android:strokeLineCap="round"
+            android:pathData="M140,172 L200,268" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="18"
+            android:strokeLineCap="round"
+            android:pathData="M372,172 L312,268" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="22"
+            android:strokeLineCap="round"
+            android:pathData="M80,268 A75,75 0 0,0 200,268" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="22"
+            android:strokeLineCap="round"
+            android:pathData="M312,268 A75,75 0 0,0 432,268" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="26"
+            android:strokeLineCap="round"
+            android:pathData="M212,356 H300" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="30"
+            android:strokeLineCap="round"
+            android:pathData="M188,392 H324" />
+    </group>
+</vector>

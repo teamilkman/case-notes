@@ -1,0 +1,10 @@
+import {mkdirSync} from 'node:fs';
+import {resolve,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {spawnSync} from 'node:child_process';
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const folder=resolve(root,'backups');mkdirSync(folder,{recursive:true});
+const output=resolve(folder,`case-notes-${new Date().toISOString().replaceAll(':','-')}.sql`);
+const result=spawnSync(process.execPath,[resolve(root,'node_modules/wrangler/bin/wrangler.js'),'d1','export','case-notes','--local','--output',output],{cwd:root,stdio:'inherit',env:{...process.env,WRANGLER_SEND_METRICS:'false'}});
+if(result.status!==0)process.exit(result.status??1);
+process.stdout.write(`本地数据库备份已保存：${output}\n包含日志与鉴权记录；未上传到云端。\n`);

@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>案记 · 看板</title>
+<link rel="icon" href="/web/logo.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/web/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#f4f6f3">
+<link rel="stylesheet" href="/theme.css">
+<link rel="stylesheet" href="/web/vendor/swiper.min.css">
+<link rel="stylesheet" href="/legacy.css">
+</head>
+<body>
+
+<template id="app-tpl">
+  <div>
+    <a class="skip-link" href="#workspace" @click.prevent="$refs.workspace.focus()">跳到工作区</a>
+    <header class="app-header">
+      <div class="brand"><img class="mark" src="/web/logo.svg" alt=""><div><h1>案记</h1><span>个人工作空间</span></div></div>
+      <nav class="seg" aria-label="主导航">
+        <button :class="{on:$state.view==='kanban'}" :aria-current="$state.view==='kanban'?'page':null" @click="navigate('kanban')"><ui-icon name="board"></ui-icon>看板</button>
+        <button :class="{on:$state.view==='cases'}" :aria-current="$state.view==='cases'?'page':null" @click="navigate('cases')"><ui-icon name="folder"></ui-icon>案件</button>
+        <button :class="{on:$state.view==='calendar'}" :aria-current="$state.view==='calendar'?'page':null" @click="navigate('calendar')"><ui-icon name="calendar"></ui-icon>日历</button>
+      </nav>
+      <div class="header-stats" role="group" aria-label="工作概览" :aria-busy="$state.statsLoading">
+        <span class="header-stat" v-for="metric in [{key:'active',label:'在办案件'},{key:'todos',label:'待办事项'},{key:'future',label:'未来开庭'},{key:'month',label:'本月开庭'}]" :key="metric.key"><b :class="{skeleton:$state.statsLoading&&$state.counts[metric.key]===undefined}">{{ $state.counts[metric.key]??'—' }}</b><span>{{ metric.label }}</span></span>
+      </div>
+      <div class="h-right"><span class="header-date">{{ todayStr() }}<span>{{ wk(todayStr()) }}</span></span><button class="sync-btn" :disabled="$state.loggingOut" @click="logout"><ui-icon name="logout"></ui-icon>{{ $state.loggingOut?'退出中…':'退出' }}</button></div>
+    </header>
+    <nav class="tabbar" aria-label="主导航" :style="{'--active-tab':['kanban','cases','calendar'].indexOf($state.view)}">
+      <button :class="{on:$state.view==='kanban'}" :aria-current="$state.view==='kanban'?'page':null" @click="navigate('kanban')"><ui-icon name="board"></ui-icon>看板</button>
+      <button :class="{on:$state.view==='cases'}" :aria-current="$state.view==='cases'?'page':null" @click="navigate('cases')"><ui-icon name="folder"></ui-icon>案件</button>
+      <button :class="{on:$state.view==='calendar'}" :aria-current="$state.view==='calendar'?'page':null" @click="navigate('calendar')"><ui-icon name="calendar"></ui-icon>日历</button>
+    </nav>
+    <div v-if="$state.connection.offline||$state.connection.error" class="offline-bar" role="status"><span>离线缓存 · 只读，内容可能不是最新。仅可查看已缓存的页面。<span v-if="$state.connection.authRequired"> 登录后可恢复同步。</span><span v-if="$state.connection.error"> {{ $state.connection.error }}</span></span><button class="mini-btn" :disabled="$state.connection.reconnecting" @click="reconnect">{{ $state.connection.reconnecting?'正在连接…':$state.connection.authRequired?'登录后同步':'重新连接' }}</button></div>
+    <div v-if="$state.statsError" class="stats-error" role="status"><span>概览统计读取失败</span><button class="mini-btn" @click="loadStats">重试</button></div>
+    <div id="workspace" ref="workspace" class="workspace-anchor" tabindex="-1"></div>
+    <div class="errbar" v-if="$state.error">{{ $state.error }}</div>
+    <page-deck v-if="D" class="view-pages" label="看板、案件和日历" :model-value="$state.view" :items="$state.pageOrder" :disabled="swipeLocked" :block-next="$state.view==='cases'&&!!$state.selCase&&$state.caseParent!=='cases'" lazy :preload="$state.viewsReady" @update:model-value="swiped" @settled="pageSettled">
+      <template #default="{item,visible,active}"><keep-alive><component v-if="visible" :is="item+'-view'" :active="active"></component></keep-alive></template>
+    </page-deck>
+    <div class="loading" v-else-if="!D && !$state.error">加载中…</div>
+    <toast-box></toast-box>
+  </div>
+</template>
+
+<template id="kanban-tpl">
+  <main class="board-wrap">
+    <div class="col-tabs section-tabs" :style="{'--active-tab':boardColumns.indexOf(mCol),'--tab-count':boardColumns.length}">
+      <button :class="{on: mCol==='todo'}" :aria-pressed="mCol==='todo'" @click="switchCol('todo')">待办<span class="cn">{{ todoFeed.total??'-' }}</span></button>
+      <button :class="{on: mCol==='hearing'}" :aria-pressed="mCol==='hearing'" @click="switchCol('hearing')">开庭<span class="cn">{{ scheduleFeed.total??'-' }}</span></button>
+      <button v-if="boardColumns.includes('cases')" :class="{on: mCol==='cases'}" :aria-pressed="mCol==='cases'" @click="switchCol('cases')">在办案件<span class="cn">{{ $state.counts.active??'-' }}</span></button>
+    </div>
+    <page-deck class="board" label="看板分栏，左右滑动切换" v-model="mCol" :items="boardColumns" desktop="columns" :disabled="submitting">
+      <template #default="{item}">
+      <section v-if="item==='todo'" class="col" :class="{active: mCol==='todo'}">
+        <h2><span class="board-col-label">待办 <span class="cnt">{{ todoFeed.total??'-' }}</span></span>
+          <button class="submit-btn" :disabled="submitting || !selCount || $state.connection.offline" @click="submitTodos">
+            {{ submitting ? '正在完成…' : '完成所选'+(selCount?' · '+selCount:'') }}
+          </button>
+        </h2>
+        <p class="hint">勾选事项后，点击「完成所选」保存</p>
+        <div class="cards" :aria-busy="todoFeed.loading">
+          <loading-skeleton v-if="todoFeed.loading&&!todoFeed.items.length" label="正在加载待办"></loading-skeleton>
+          <div class="card todo" :class="{'t-urgent':t.状态==='紧急','t-wait':t.状态==='等待',selected:sel[t.line_id]}"
+               v-for="t in todos" :key="t.line_id" @click="toggleSel(t)">
+            <label class="todo-check" @click.stop><input type="checkbox" name="todo" :aria-label="'勾选待办：'+t.文本" v-model="sel[t.line_id]" :disabled="submitting"></label>
+            <div class="t-body">
+              <div class="t-head">
+                <div class="t-meta"><a class="t-case" href="#" :title="t.案件" @click.prevent.stop="openCase(t.case_id)">{{ t.案件 }}</a>
+                  <span class="tag-urg" v-if="t.状态==='紧急'">紧急</span>
+                  <span class="tag-wait" v-if="t.状态==='等待'">等待</span></div>
+                <span class="t-ddl" v-if="t.截止">
+                  <span>截止 {{ t.截止 }}{{ t.截止时间 ? ' ' + t.截止时间 : '' }}</span>
+                  <span class="cd" :class="ddlInfo(t).cls">{{ ddlInfo(t).label }}</span>
+                </span>
+              </div>
+              <div class="t-text">{{ t.文本 }}</div>
+            </div>
+          </div>
+          <page-tail :feed="todoFeed" label="待办"></page-tail>
+          <div class="empty" v-if="todoFeed.total===0&&!todoFeed.loading&&!todoFeed.error">暂无待办事项</div>
+          <div class="done-sep">
+            <div class="done-head">
+              <button class="done-toggle" :aria-expanded="doneOpen" @click="doneOpen=!doneOpen">
+              <span class="done-arrow">{{ doneOpen ? '▾' : '▸' }}</span>
+              <span class="done-title">近期完成</span>
+              <span class="cnt">{{ activityCount??'-' }}</span></button>
+              <span class="win-toggle" @click.stop><button v-for="n in [7,30]" :key="n" :class="{on: doneDays===n}" :aria-pressed="doneDays===n" @click="doneDays=n">{{ n }}天</button></span>
+            </div>
+          </div>
+          <template v-if="doneOpen">
+            <loading-skeleton v-if="activityFeed.loading&&!activityFeed.items.length" label="正在加载近期记录"></loading-skeleton>
+            <div class="card h" v-for="e in done" :key="e.line_id" :class="[statusClass(e.状态), {done: e.标记==='[x]'}]">
+              <div class="h-date"><span :class="{when: e.日期===today}">{{ e.日期===today ? '今天 '+e.日期+' '+wk(e.日期) : e.日期+' '+wk(e.日期) }}</span> {{ e.时间||'--:--' }}</div>
+              <div class="h-meta"><a href="#" @click.prevent="openCase(e.path)">{{ e.案件 }}</a><span v-if="e.标记==='[x]'" class="done-tag"><ui-icon name="check"></ui-icon>已完成</span><span v-else-if="e.标记" class="mk">{{ e.标记 }}</span></div>
+              <div class="h-info">{{ e.文本 }}</div>
+            </div>
+            <page-tail :feed="activityFeed" label="记录"></page-tail>
+            <div class="empty" v-if="activityFeed.total===0&&!activityFeed.loading&&!activityFeed.error">近{{ doneDays }}天无记录</div>
+          </template>
+        </div>
+      </section>
+      <section v-if="item==='hearing'" class="col" :class="{active: mCol==='hearing'}">
+        <h2><span class="board-col-label">开庭 <span class="cnt">{{ scheduleFeed.total??'-' }}</span></span>
+          <span class="win-toggle section-tabs" :style="{'--active-tab':['未来','全部','历史'].indexOf(hearingTab),'--tab-count':3}"><button v-for="tab in ['未来','全部','历史']" :key="tab" :class="{on: hearingTab===tab}" :aria-pressed="hearingTab===tab" @click="hearingTab=tab">{{ tab }}</button></span>
+        </h2>
+        <div class="cards" :aria-busy="scheduleFeed.loading">
+          <loading-skeleton v-if="scheduleFeed.loading&&!scheduleFeed.items.length" label="正在加载开庭"></loading-skeleton>
+          <div class="card h" v-for="e in hearings" :key="e.line_id" :class="[statusClass(e.状态), {past: e.日期<today}]">
+            <div class="h-date"><span :class="{when: e.日期===today}">{{ e.日期===today ? '今天 '+e.日期+' '+wk(e.日期) : e.日期+' '+wk(e.日期) }}</span> {{ e.时间||'--:--' }}<span :class="e.日期<today ? 'cd past' : cdClass(e.日期)">{{ countdown(e.日期) }}</span></div>
+            <div class="h-meta"><a href="#" @click.prevent="openCase(e.path)">{{ e.案件 }}</a><status-badge :st="e.状态"></status-badge></div>
+            <div class="h-info">{{ e.文本 }}</div>
+          </div>
+          <page-tail :feed="scheduleFeed" label="开庭"></page-tail>
+          <div class="empty" v-if="scheduleFeed.total===0&&!scheduleFeed.loading&&!scheduleFeed.error">{{ hearingTab==='未来' ? '暂无未来开庭' : (hearingTab==='历史' ? '暂无历史开庭' : '暂无开庭') }}</div>
+        </div>
+      </section>
+      <section v-if="item==='cases'" class="col cases" :class="{active: mCol==='cases'}">
+        <h2>在办案件 <span class="cnt">{{ caseFeed.total??'-' }}</span></h2>
+        <cases-search-input v-model="$state.casesSearch"></cases-search-input>
+        <div class="cards" :aria-busy="caseFeed.loading">
+          <loading-skeleton v-if="caseFeed.loading&&!caseFeed.items.length" kind="case" :rows="6" label="正在加载案件"></loading-skeleton>
+          <button class="card case" v-for="c in filtered" :key="c.path" @click="openCase(c.path)">
+            <div>
+              <div class="c-name">{{ c.名称 }}</div>
+              <div class="c-sub" v-if="c.案由">{{ c.案由 }}</div>
+              <div class="ci-snippet" v-if="$state.casesSearch.trim()" v-html="snippetFor(c)"></div>
+            </div>
+            <div class="c-recent">{{ c.最近活动 || '-' }}<ui-icon name="chevron"></ui-icon></div>
+          </button>
+          <page-tail :feed="caseFeed" label="案件"></page-tail>
+          <div class="empty" v-if="caseFeed.total===0&&!caseFeed.loading&&!caseFeed.error">无匹配案件</div>
+        </div>
+      </section>
+      </template>
+    </page-deck>
+  </main>
+</template>
+
+<template id="cal-tpl">
+  <main class="cal-wrap">
+    <div class="cal-workspace">
+      <section class="cal-month" :class="{'picker-open':monthPickerOpen}" aria-label="月历">
+        <div class="cal-nav">
+          <div class="cal-month-title"><span class="cal-eyebrow">{{ cal.y }} 年</span><h3>{{ cal.m+1 }}<span>月</span></h3></div>
+          <div class="cal-month-tools">
+            <div class="cal-jump">
+              <button ref="monthTrigger" class="cal-month-trigger" aria-label="选择月份" aria-haspopup="dialog" :aria-expanded="monthPickerOpen" aria-controls="calendar-month-picker" @click="toggleMonthPicker"><ui-icon name="calendar"></ui-icon><span>{{ calTitle }}</span><ui-icon name="chevron"></ui-icon></button>
+              <teleport v-if="monthPickerOpen" to="body" :disabled="!$state.mobile">
+                <div class="cal-picker-backdrop" aria-hidden="true" @click="closeMonthPicker()"></div>
+                <div id="calendar-month-picker" ref="monthPicker" class="cal-month-picker" role="dialog" aria-modal="true" aria-label="选择年份和月份" @keydown="monthPickerKey">
+                  <div class="cal-picker-year"><button class="nav" aria-label="上一年" :disabled="pickerYear<=1000" @click="stepPickerYear(-1)">‹</button><label><input ref="pickerYearInput" type="text" inputmode="numeric" maxlength="4" aria-label="年份" :value="pickerYear" @change="setPickerYear($event)" @keydown.enter.prevent="setPickerYear($event)"><span>年</span></label><button class="nav" aria-label="下一年" :disabled="pickerYear>=9999" @click="stepPickerYear(1)">›</button></div>
+                  <div class="cal-picker-months" role="group" :aria-label="pickerYear+'年的月份'">
+                    <button v-for="m in 12" :key="m" :data-month="m-1" :aria-pressed="pickerYear===cal.y&&m-1===cal.m" @click="pickMonth(m-1)" @keydown="pickerMonthKey($event,m-1)">{{ m }}月</button>
+                  </div>
+                  <button class="cal-picker-cancel" @click="closeMonthPicker()">取消</button>
+                </div>
+              </teleport>
+            </div>
+            <button class="go-today" @click="goToday">今天</button>
+            <div class="cal-arrows"><button class="nav" aria-label="上个月" @click="nav(-1)">‹</button><button class="nav" aria-label="下个月" @click="nav(1)">›</button></div>
+          </div>
+        </div>
+        <div class="cal-month-meta" :aria-busy="calendarLoading">
+          <span v-if="!calendarUnavailable">本月 <b>{{ monthSummary.hearings }}</b> 场开庭<span class="cal-meta-sep">·</span>分布于 <b>{{ monthSummary.days }}</b> 天</span>
+          <span v-else>{{ calendarError ? '本月日程读取失败' : '正在读取本月日程…' }}</span>
+          <span class="cal-key-hint">{{ $state.mobile?'左右滑动换月':'方向键选日期' }}</span>
+        </div>
+        <div class="cal-grid-wrap" data-swipe-contained :aria-busy="calendarLoading" @pointerdown.stop @touchstart.stop>
+          <!-- Month contacts stay here even during recentering or at an edge. -->
+          <page-deck ref="monthPages" class="month-pages" label="左右滑动切换月份" model-value="current" :items="['prev','current','next']" :disabled="monthPickerOpen||!!pendingMonth" contain reset @update:model-value="monthSwiped">
+          <template #default="{item:page,visible}">
+          <div v-if="visible" class="cal-grid" :class="{'is-loading':calendarLoading}" :style="{'--cal-weeks':monthGrid(page).length/7}" role="group" :aria-label="calTitle+'，使用方向键选日期，PageUp 和 PageDown 切换月份'">
+            <div class="cal-wd" v-for="(w,i) in ['一','二','三','四','五','六','日']" :key="w" :class="{weekend:i>4}">周{{ w }}</div>
+            <template v-for="(cell,i) in monthGrid(page)" :key="i">
+              <div v-if="cell" class="cal-cell" :class="{today:cell.date===today,sel:cell.date===cal.sel,weekend:i%7>4,'has-events':monthEvents(cell,page).length}">
+                <button class="cal-day-select" :data-date="cell.date" :tabindex="cell.date===cal.sel?0:-1" :aria-label="dayLabel(cell)" :aria-pressed="cell.date===cal.sel" :aria-current="cell.date===today?'date':null" @click="select(cell.date)" @keydown="dayKey($event,cell.date)"><span class="day-num">{{ cell.day }}</span><span class="cal-today-label" v-if="cell.date===today">今天</span></button>
+                <div class="cal-cell-events" aria-hidden="true">
+                  <span class="cal-event-dot" v-for="h in monthEvents(cell,page).slice(0,3)" :key="h.line_id" :class="statusClass(h.状态)"></span>
+                  <span class="cal-mobile-time" v-if="monthEvents(cell,page).length">{{ monthEvents(cell,page).length>3 ? monthEvents(cell,page).length+'场' : monthEvents(cell,page)[0].时间||'待定' }}</span>
+                </div>
+                <button v-for="h in monthEvents(cell,page).slice(0,2)" :key="h.line_id" class="cal-event" :class="statusClass(h.状态)" :title="(h.时间||'时间待定')+' '+h.案件+' '+h.文本" @click="doOpenCase(cell.date,h.path)"><span class="ct">{{ h.时间||'待定' }}</span><span class="cn">{{ h.案件 }}</span></button>
+                <button class="cal-more" v-if="monthEvents(cell,page).length>2" @click="select(cell.date)">另 {{ monthEvents(cell,page).length-2 }} 场</button>
+                <button class="cal-more cal-compact-more" v-if="monthEvents(cell,page).length>1" :aria-label="'查看'+cell.date+'的全部'+monthEvents(cell,page).length+'场开庭'" @click="select(cell.date)">另 {{ monthEvents(cell,page).length-1 }} 场</button>
+              </div>
+              <div v-else class="cal-cell blank" aria-hidden="true"></div>
+            </template>
+          </div>
+          <span v-if="visible&&page!=='current'&&!monthReady(page)" class="month-preview-state">日程待加载</span>
+          </template>
+          </page-deck>
+          <div v-if="calendarLoading||calendarError" class="calendar-state" :class="{'is-error':calendarError}" role="status" aria-live="polite"><template v-if="calendarLoading"><span class="loading-dot" aria-hidden="true"></span><span>正在加载 {{ calTitle }} 的开庭日程…</span></template><template v-else><span>{{ calTitle }}的日程加载失败：{{ calendarError }}</span><button class="mini-btn" @click="loadCalendar(true)">重试</button></template></div>
+        </div>
+        <div class="cal-legend"><span class="lg"><i class="dot st-in"></i>在办</span><span class="lg"><i class="dot st-done"></i>结案</span><span class="lg"><i class="dot st-pend"></i>结案未整卷</span><span class="cal-legend-note">点击日程打开案件</span></div>
+      </section>
+      <aside class="cal-detail" tabindex="-1" aria-label="选中日期的开庭安排" :aria-busy="calendarLoading">
+        <div class="cal-detail-head"><p class="cal-eyebrow">当日安排<span v-if="cal.sel===today" class="cal-today-pill">今天</span></p><h3 class="detail-title">{{ detailTitle }}</h3><span class="cal-day-count" v-if="!calendarUnavailable">{{ dayHearings.length }} 场开庭</span></div>
+        <div class="cal-agenda" aria-live="polite">
+          <loading-skeleton v-if="calendarLoading" :rows="2" label="正在加载当日安排"></loading-skeleton>
+          <div class="cal-day-empty" v-else-if="calendarError"><span class="cal-empty-icon" aria-hidden="true">…</span><h4>暂时无法显示安排</h4><p>请重试本月日程读取</p></div>
+          <div class="cal-day-empty" v-else-if="!dayHearings.length"><svg class="cal-empty-icon" viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="9" y="12" width="30" height="29" rx="5" stroke="currentColor" stroke-width="1.5"/><path d="M9 21h30M17 8v8M31 8v8M19 30l4 4 7-8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><h4>这一天没有开庭安排</h4><p>选择其他日期，查看当天日程</p></div>
+          <article class="cal-agenda-item" v-for="h in dayHearings" :key="h.line_id" :class="statusClass(h.状态)">
+            <div class="cal-agenda-time"><i class="dot" :class="statusClass(h.状态)"></i><time>{{ h.时间||'时间待定' }}</time><status-badge :st="h.状态"></status-badge></div>
+            <a class="cal-agenda-case" href="#" @click.prevent="openCase(h.path)">{{ h.案件 }}<span aria-hidden="true">↗</span></a><p class="cal-agenda-text">{{ h.文本 }}</p>
+          </article>
+        </div>
+        <button class="cal-next" v-if="!calendarUnavailable&&nextHearing" @click="select(nextHearing[0])"><span>本月下一开庭日<b>{{ Number(nextHearing[0].slice(5,7)) }}月{{ Number(nextHearing[0].slice(8)) }}日 · {{ nextHearing[1].length }}场</b></span><span aria-hidden="true">→</span></button>
+        <p class="cal-detail-foot">日程随案件笔记保存更新</p>
+      </aside>
+    </div>
+    <div class="hm-wrap" :class="{'heat-unavailable':!heatReady}" :aria-busy="calendarLoading&&!heatReady">
+      <div class="hm-head">
+        <h3>{{ heatExpand ? '历年开庭分布' : cal.y+' 年开庭分布' }}</h3>
+        <span class="hm-hint">点击月份或周，查看对应日程</span>
+        <div class="seg-sm">
+          <button :class="{on: heatGran==='month'}" :aria-pressed="heatGran==='month'" @click="heatGran='month'">月</button>
+          <button :class="{on: heatGran==='week'}" :aria-pressed="heatGran==='week'" @click="heatGran='week'">周</button>
+        </div>
+        <button class="hm-expand" :aria-expanded="heatExpand" @click="heatExpand=!heatExpand">{{ heatExpand ? '收起' : '展开全部' }}</button>
+      </div>
+      <!-- 月视图(默认) -->
+      <template v-if="heatGran==='month'">
+        <div class="mm-grid" v-if="!heatExpand">
+          <button type="button" class="mm-cell" v-for="mb in curYearMonthData.months" :key="mb.m" :class="calendarLoading&&!heatReady?'':'lv'+mb.lvl"
+               :title="monthTitle(mb, curYearMonthData.year)" :aria-pressed="mb.m===cal.m" @click="jumpToMonth(curYearMonthData.year, mb)"><span>{{ mb.m+1 }}月</span><small>{{ heatReady ? mb.n+' 场' : '—' }}</small></button>
+        </div>
+        <div class="hm-all" v-else>
+          <div class="hm-yr" v-for="h in allYearsMonthData" :key="h.year">
+            <div class="hm-yr-label">{{ h.year }}</div>
+            <div class="mm-grid">
+              <button type="button" class="mm-cell" v-for="mb in h.months" :key="mb.m" :class="calendarLoading&&!heatReady?'':'lv'+mb.lvl"
+                   :title="monthTitle(mb, h.year)" :aria-pressed="h.year===cal.y&&mb.m===cal.m" @click="jumpToMonth(h.year, mb)"><span>{{ mb.m+1 }}月</span><small>{{ heatReady ? mb.n+' 场' : '—' }}</small></button>
+            </div>
+          </div>
+        </div>
+      </template>
+      <!-- 周视图(切换) -->
+      <template v-else>
+        <div class="hm-grid" v-if="!heatExpand" :style="'grid-template-columns:repeat('+heatWeeks.weeks.length+',var(--hm-cell))'">
+          <div class="hm-month" v-for="ml in heatMonths" :key="ml.m"
+               :style="'grid-row:1;grid-column:'+(ml.c1+1)+'/span '+ml.span">{{ ml.m+1 }}月</div>
+          <button type="button" class="hm-cell" v-for="(wk,i) in heatWeeks.weeks" :key="i" :class="calendarLoading&&!heatReady?'':'lv'+wk.lvl"
+               :title="weekTitle(wk,i)" @click="jumpToWeek(heatWeeks,wk,i)"><span class="sr-only">{{ weekTitle(wk,i) }}</span></button>
+        </div>
+        <div class="hm-all" v-else>
+          <div class="hm-yr" v-for="h in heatAllYears" :key="h.year">
+            <div class="hm-yr-label">{{ h.year }}</div>
+            <div class="hm-yr-grid" :style="'grid-template-columns:repeat('+h.weeks.length+',var(--hm-cell))'">
+              <div class="hm-month" v-for="ml in h.months" :key="ml.m"
+                   :style="'grid-row:1;grid-column:'+(ml.c1+1)+'/span '+ml.span">{{ ml.m+1 }}月</div>
+              <button type="button" class="hm-cell" v-for="(wk,i) in h.weeks" :key="i" :class="calendarLoading&&!heatReady?'':'lv'+wk.lvl"
+                   :title="weekTitle(wk,i,h)" @click="jumpToWeek(h,wk,i)"><span class="sr-only">{{ weekTitle(wk,i,h) }}</span></button>
+            </div>
+          </div>
+        </div>
+      </template>
+      <p class="cal-heat-empty" v-if="heatExpand&&heatReady&&!allYearsMonthData.length">暂无历年开庭记录</p>
+      <div class="hm-legend">少
+        <i class="hm-l lv0"></i><i class="hm-l lv1"></i><i class="hm-l lv2"></i><i class="hm-l lv3"></i><i class="hm-l lv4"></i>
+        多</div>
+    </div>
+  </main>
+</template>
+
+<template id="cases-tpl">
+  <main class="cases-wrap" :class="{'has-sel':!!selCase,'is-editing':editing}">
+    <page-deck class="cases-layout" label="案件列表与详情，右滑返回上级" :model-value="selCase?'detail':'list'" :items="['list','detail']" desktop="columns" :disabled="!selCase||editing||saving||dlg||($state.caseParent&&$state.caseParent!=='cases')" contain @update:model-value="detailSwiped" @settled="detailSettled">
+    <template #default="{item}">
+    <div v-if="item==='list'" class="cases-left">
+      <div class="cases-filter"><div class="cases-list-title"><h3>{{ group==='事务'?'事务':group+'案件' }}</h3><span>{{ feed.total??'—' }} 项</span></div>
+        <div class="seg-sm section-tabs" :style="{'--active-tab':groups.indexOf(group),'--tab-count':groups.length}">
+          <button v-for="g in groups" :key="g" :class="{on: group===g}" :aria-pressed="group===g" @click="group=g">{{ g }}<i>{{ count(g) }}</i></button>
+        </div>
+        <cases-search-input v-model="$state.casesSearch"></cases-search-input>
+      </div>
+      <page-deck class="case-group-pages" label="在办、归档和事务，左右滑动切换" v-model="group" :items="groups">
+      <template #default="{item:g}">
+      <div class="cases-list" :aria-busy="groupFeed(g).loading">
+        <loading-skeleton v-if="!groupFeed(g).items.length&&(groupFeed(g).loading||(!groupFeed(g).loadedAt&&!groupFeed(g).error))" kind="case" :rows="6" label="正在加载案件列表"></loading-skeleton>
+        <button class="case-item" v-for="c in groupCases(g)" :key="c.path" :class="{sel:c.path===selCase}" :aria-pressed="c.path===selCase" @click="selectCase(c.path)">
+          <div class="ci-top">
+            <span class="ci-name">{{ c.名称 }}</span>
+            <status-badge :st="c.状态"></status-badge>
+          </div>
+          <div class="ci-sub" v-if="c.案由">{{ c.案由 }}</div>
+          <div class="ci-snippet" v-if="$state.casesSearch.trim()" v-html="snippetFor(c)"></div>
+          <div class="ci-recent">最近活动 {{ c.最近活动 || '-' }}</div>
+        </button>
+        <page-tail :feed="groupFeed(g)" label="案件"></page-tail>
+        <div class="empty" v-if="groupFeed(g).total===0&&!groupFeed(g).loading&&!groupFeed(g).error">无匹配案件</div>
+      </div>
+      </template>
+      </page-deck>
+    </div>
+    <div v-if="item==='detail'" class="cases-right">
+      <div v-if="sel" class="case-detail">
+        <div class="cd-head">
+          <button class="mini-btn back-btn" :disabled="saving" @click="backToList"><ui-icon name="back"></ui-icon>{{ editing?'返回详情':backLabel }}</button>
+          <h2>{{ sel.名称 }}</h2>
+          <div class="cd-actions">
+            <template v-if="!editing">
+              <button class="mini-btn" :disabled="mdLoading||mdErr||dbDoc?.case?.status!=='在办'" @click="enterEdit"><ui-icon name="edit"></ui-icon>编辑笔记</button>
+            </template>
+            <template v-else>
+              <div class="edit-tabs compact-edit-tabs"><button :aria-pressed="editPane==='write'" :class="{on:editPane==='write'}" @click="editPane='write'">编辑</button><button :aria-pressed="editPane==='preview'" :class="{on:editPane==='preview'}" @click="editPane='preview'">预览</button></div>
+              <button class="mini-btn primary" :disabled="saving||$state.connection.offline" @click="saveEdit">{{ saving ? '保存中…' : '保存' }}</button>
+              <button class="mini-btn" :disabled="saving" @click="cancelEdit">取消</button>
+            </template>
+          </div>
+        </div>
+        <div class="case-meta">
+          <div class="c-meta"><status-badge :st="sel.状态"></status-badge><div><span>案由</span><b>{{ sel.案由||'未填写' }}</b></div><div><span>案号</span><b>{{ sel.案号||'未填写' }}</b></div><div><span>法院</span><b>{{ sel.法院||'未填写' }}</b></div></div>
+          <div class="c-dates">创建 {{ sel.创建||'-' }} ｜ 最近活动 {{ sel.最近活动||'-' }}</div>
+        </div>
+        <div class="notes-head"><h3>{{ editing?'编辑笔记':'工作记录' }}</h3><span v-if="editing" class="edit-state">{{ saving?'正在保存…':editText!==mdText?'有未保存的修改':'编辑模式' }}</span><span v-else-if="dbDoc?.case?.status!=='在办'" class="readonly-note"><ui-icon name="lock"></ui-icon>归档笔记只读</span></div>
+        <template v-if="!editing">
+          <div class="case-content">
+          <loading-skeleton v-if="mdLoading&&!mdText" kind="notes" :rows="5" label="正在加载案件笔记"></loading-skeleton>
+          <div v-else-if="mdErr" class="md-loading">加载失败，<a href="#" @click.prevent="loadMd()">点击重试</a></div>
+          <div v-else-if="!mdText" class="empty notes-empty"><ui-icon name="file"></ui-icon><h4>还没有工作记录</h4><p>{{ dbDoc?.case?.status==='在办'?'点击「编辑笔记」，记录案件进展':'此案件暂无笔记内容' }}</p></div>
+          <div v-else class="md-body" v-html="rendered"></div>
+          </div>
+        </template>
+        <div v-if="editing&&dbEditor?.draftNotice" class="errbar" role="status">{{ dbEditor.draftNotice }}</div>
+        <div v-if="editing" class="edit-tabs" :style="{'--active-tab':editPane==='preview'?1:0}"><button :aria-pressed="editPane==='write'" :class="{on:editPane==='write'}" @click="editPane='write'">编辑</button><button :aria-pressed="editPane==='preview'" :class="{on:editPane==='preview'}" @click="editPane='preview'">预览</button></div>
+        <page-deck v-if="editing" class="md-split" label="编辑和预览，左右滑动切换" v-model="editPane" :items="['write','preview']" desktop="columns" :disabled="saving||dlg" contain>
+          <template #default="{item}">
+          <div v-if="item==='write'" class="md-left"><span class="editor-pane-label">笔记正文</span>
+            <div class="md-toolbar">
+              <button class="mini-btn" :disabled="saving" title="弹窗填写日期时间正文，插入到光标所在行的下一行" @click="openDlg"><ui-icon name="calendar"></ui-icon>插入日程</button>
+              <button class="mini-btn" :disabled="saving" title="行首复选框循环切换：无 ↔ - [ ]；- [x] 已完成项不参与切换" @click="insertTodo"><ui-icon name="check"></ui-icon>切换待办</button>
+            </div>
+            <textarea ref="editor" class="md-editor" name="md-editor" aria-label="案件笔记正文" :value="editText" :disabled="saving" @input="noteInput" @compositionend="noteInput" @beforeinput="beforeNoteInput" spellcheck="false"
+                      placeholder="在此编辑 Markdown 笔记（支持 - 列表、📅 日程、[ ] 待办、## 标题、--- 分隔块等，保存到数据库）"></textarea>
+          </div>
+          <div v-if="item==='preview'" class="md-preview"><span class="editor-pane-label">阅读预览</span><div class="md-body" v-html="editRendered"></div><p class="preview-empty" v-if="!editText">笔记预览将在这里显示</p></div>
+          </template>
+        </page-deck>
+      </div>
+      <div class="cases-placeholder" v-else><template v-if="selCase"><button class="mini-btn back-btn" @click="backToList">‹ 返回</button><loading-skeleton v-if="mdLoading" kind="notes" :rows="5" label="正在加载案件笔记"></loading-skeleton><button v-else-if="mdErr" class="mini-btn" @click="loadMd()">读取失败 · 重试</button></template><div v-else class="placeholder-content"><ui-icon name="file"></ui-icon><h3>选择一个案件，展开工作记录</h3><p>从左侧列表查找案件，也可以搜索笔记内容</p></div></div>
+      <teleport to="body"><transition name="dialog">
+      <div class="dlg-mask" v-if="dlg" @click.self="!saving&&(dlg=false)">
+        <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="schedule-title" aria-describedby="schedule-hint" @keydown="dialogKey">
+          <div class="dlg-head"><h3 id="schedule-title"><ui-icon name="calendar"></ui-icon>添加日程</h3><button class="icon-btn" aria-label="关闭日程窗口" :disabled="saving" @click="dlg=false"><ui-icon name="close"></ui-icon></button></div>
+          <p id="schedule-hint">插入光标所在行的下一行，保存笔记后生效</p>
+          <div class="dlg-fields"><div><label for="schedule-date">日期</label><input ref="dialogDate" id="schedule-date" type="date" v-model="dlgDate"></div><div><label for="schedule-time">时间 <span>可选</span></label><input id="schedule-time" type="time" v-model="dlgTime"></div></div>
+          <label for="schedule-text">日程内容</label><textarea id="schedule-text" v-model="dlgText" placeholder="填写事项、地点或其他开庭安排"></textarea>
+          <div class="dlg-actions">
+            <button class="mini-btn" :disabled="saving" @click="dlg=false">取消</button>
+            <button class="mini-btn primary" :disabled="saving" @click="dlgOk">插入</button>
+          </div>
+        </div>
+      </div>
+      </transition></teleport>
+    </div>
+    </template>
+    </page-deck>
+  </main>
+</template>
+
+<template id="toast-tpl">
+  <transition name="feedback">
+  <div v-if="$state.toast" class="toast" :class="$state.toast.kind" :role="$state.toast.kind==='err'?'alert':'status'"><ui-icon :name="$state.toast.kind==='err'?'alert':'check'"></ui-icon>{{ $state.toast.msg }}</div>
+  </transition>
+</template>
+
+<div id="app"></div>
+
+<script src="/web/vendor/vue.global.prod.js"></script>
+<script src="/web/vendor/marked.min.js"></script>
+<script src="/web/vendor/swiper.min.js"></script>
+<script type="module" src="/legacy-app.js"></script>
+<script src="/register-sw.js"></script>
+</body>
+</html>

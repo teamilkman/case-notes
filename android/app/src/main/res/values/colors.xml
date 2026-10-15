@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand">#35705C</color>
+    <color name="background">#F4F6F3</color>
+    <!-- 网页头部与手机底部标签栏的底色，系统状态栏/导航栏沿用同色 -->
+    <color name="surface">#FFFFFF</color>
+</resources>

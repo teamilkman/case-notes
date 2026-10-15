@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 26 以下沿用带圆角绿底的 logo 图形（旧启动器不会加白色底板）。 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/logo" />
+</layer-list>

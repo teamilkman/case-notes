@@ -1,0 +1,39 @@
+{
+  "name": "case-notes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "predev": "node tools/vendor-dexie.mjs && node tools/render-wrangler.mjs",
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8787",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run build",
+    "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
+    "predb:migrate": "node tools/render-wrangler.mjs",
+    "db:migrate": "wrangler d1 migrations apply case-notes --local",
+    "setup:local": "tsx tools/setup-local.ts",
+    "backup:local": "tsx tools/backup-local.ts",
+    "prebuild": "node tools/vendor-dexie.mjs && node tools/render-wrangler.mjs",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "predeploy": "node tools/vendor-dexie.mjs && node tools/render-wrangler.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "dexie": "4.4.6",
+    "swiper": "14.3.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261010.1",
+    "@types/node": "^24.0.0",
+    "fake-indexeddb": "^6.2.5",
+    "miniflare": "5.20261006.1-alpha",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "wrangler": "4.149.0"
+  }
+}
