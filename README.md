@@ -108,7 +108,7 @@ npm test
 | 部署地址与自定义域名 | `DEPLOYMENT_URL`、`DOMAIN` | `DEPLOYMENT_URL`、`DOMAIN` |
 | 区域与数据库标识 | `ZONE_ID`、`D1_DATABASE_ID` | `ZONE_ID`、`D1_DATABASE_ID` |
 
-需要更新 CI 凭证时，`node tools/setup-ci-secrets.mjs` 可将 `.dev.vars` 中对应值提交到 GitHub Secrets，不输出凭证；目标仓库默认 `teamilkman/case-notes`，可用 `CI_REPO` 覆盖。Cloudflare 账户管理凭证与日志应用令牌用途不同。部署地址与标识同样按 Secret 处理：CI 运行时把它们渲染进 `wrangler.jsonc`，输出日志中的取值会被 GitHub 掩码成 `***`。
+需要更新 CI 凭证时，`node tools/setup-ci-secrets.mjs` 可将 `.dev.vars` 中对应值提交到 GitHub Secrets，不输出凭证；目标仓库默认 `teamilkman/case-notes`，可用 `CI_REPO` 覆盖。Cloudflare 账户管理凭证与日志应用令牌用途不同。部署地址与标识同样按 Secret 处理：CI 运行时把它们渲染进 `wrangler.jsonc`，输出日志中的取值会被 GitHub 掩码成 `***`。运行时登录密码与 AI 令牌只在提供了对应 Secret 时才重新同步，未提供时保留云端现有值。
 
 线上核验覆盖 OAuth 发现挑战与元数据、MCP 初始化说明与 OpenAPI 描述的同源一致性、工具发现与调用、登录/退出、未认证拒绝、网页数据库列表及出现续页时的游标读取；搜索限定事务，以小页长分别核验 REST 和 MCP 的只读分页，不向正式日志写测试记录。OAuth 授权、兑换、续期与撤销在隔离 Miniflare/D1 测试中核验。识别到每日 D1 额度错误后停止即时重试，接口返回明确错误和 UTC 重置时刻。以对应提交的 CI 结果判断是否已部署，不把本地构建成功当作上线成功。
 
