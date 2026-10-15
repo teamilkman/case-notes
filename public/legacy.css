@@ -352,3 +352,4 @@
 }
 .offline-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 16px;background:var(--accent-soft);color:var(--text-2);font-size:13px;line-height:1.65}
 .offline-bar .mini-btn{flex:none;min-height:44px}
+.sync-bar{justify-content:flex-start}

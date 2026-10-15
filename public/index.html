@@ -34,7 +34,7 @@
       <button :class="{on:$state.view==='cases'}" :aria-current="$state.view==='cases'?'page':null" @click="navigate('cases')"><ui-icon name="folder"></ui-icon>案件</button>
       <button :class="{on:$state.view==='calendar'}" :aria-current="$state.view==='calendar'?'page':null" @click="navigate('calendar')"><ui-icon name="calendar"></ui-icon>日历</button>
     </nav>
-    <div v-if="!$state.connection.offline&&!$state.connection.error&&$state.connection.syncing" class="offline-bar" role="status"><span class="loading-dot" aria-hidden="true"></span><span>正在同步缓存内容…</span></div>
+    <div v-if="!$state.connection.offline&&!$state.connection.error&&$state.connection.syncing" class="offline-bar sync-bar" role="status"><span class="loading-dot" aria-hidden="true"></span><span>正在同步缓存内容…</span></div>
     <div v-if="$state.connection.offline||$state.connection.error" class="offline-bar" role="status"><span>离线缓存 · 只读，内容可能不是最新。仅可查看已缓存的页面。<span v-if="$state.connection.authRequired"> 登录后可恢复同步。</span><span v-if="$state.connection.error"> {{ $state.connection.error }}</span></span><button class="mini-btn" :disabled="$state.connection.reconnecting" @click="reconnect">{{ $state.connection.reconnecting?'正在连接…':$state.connection.authRequired?'登录后同步':'重新连接' }}</button></div>
     <div v-if="$state.statsError" class="stats-error" role="status"><span>概览统计读取失败</span><button class="mini-btn" @click="loadStats">重试</button></div>
     <div id="workspace" ref="workspace" class="workspace-anchor" tabindex="-1"></div>
