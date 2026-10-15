@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.os.SystemClock;
+import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
 
@@ -41,8 +42,7 @@ public class OfflineShellTest {
             .getSharedPreferences("case-notes", Context.MODE_PRIVATE);
         assertTrue(preferences.edit().putString("shell-host", HOST).commit());
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
-            WebView web = view(scenario);
-            awaitProgress(web);
+            WebView web = awaitShell(scenario);
             awaitCondition(web, "!!window.DB && !!document.querySelector('.app-header')");
             // Synthetic data stays entirely in emulator IndexedDB; no server writes.
             eval(web, fixture());
@@ -50,8 +50,7 @@ public class OfflineShellTest {
             eval(web, "location.hash='#/cases/android-qa'");
             // A recreated activity must show the same offline copy, not a blank page.
             scenario.recreate();
-            web = view(scenario);
-            awaitProgress(web);
+            web = awaitShell(scenario);
             awaitCondition(web, "!!window.DB && document.body.innerText.includes('合成离线记录')");
             assertEquals("true", eval(web, "DB.connection.offline"));
             assertEquals("true", eval(web, "location.origin==='https://" + HOST + "' && location.pathname.startsWith('/__app__/')"));
@@ -60,9 +59,36 @@ public class OfflineShellTest {
     }
 
     private static WebView view(ActivityScenario<MainActivity> scenario) {
-        AtomicReference<WebView> web = new AtomicReference<>();
-        scenario.onActivity(activity -> web.set((WebView) ((ViewGroup) activity.findViewById(android.R.id.content)).getChildAt(0)));
+        AtomicReference<WebView> web = new AtomicReference<>(null);
+        scenario.onActivity(activity -> {
+            View child = ((ViewGroup) activity.findViewById(android.R.id.content)).getChildAt(0);
+            web.set(child instanceof WebView ? (WebView) child : null);
+        });
         return web.get();
+    }
+
+    private static int progress(WebView web) {
+        AtomicInteger value = new AtomicInteger(-1);
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            try { value.set(web.getProgress()); } catch (Throwable ignored) { }
+        });
+        return value.get();
+    }
+
+    /**
+     * Waits for the shell document without touching the renderer, re-reading the activity's
+     * current WebView because renderer recovery and recreation both replace it.
+     */
+    private static WebView awaitShell(ActivityScenario<MainActivity> scenario) throws Exception {
+        long deadline = SystemClock.elapsedRealtime() + 120000;
+        WebView web = null;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            web = view(scenario);
+            if (web != null && progress(web) == 100) return web;
+            Thread.sleep(250);
+        }
+        fail("Shell document never finished loading (webview=" + (web != null) + ", progress=" + (web == null ? -1 : progress(web)) + ")");
+        return null;
     }
 
     private static String fixture() throws Exception {
@@ -71,23 +97,6 @@ public class OfflineShellTest {
             while ((count = in.read(buffer)) != -1) bytes.write(buffer, 0, count);
             return bytes.toString("UTF-8");
         }
-    }
-
-    /**
-     * Waits for the shell document without touching the renderer: evaluating JavaScript in a loop
-     * leaves callbacks pointing at a destroyed WebView once the activity is recreated.
-     */
-    private static void awaitProgress(WebView web) throws Exception {
-        long deadline = SystemClock.elapsedRealtime() + 90000;
-        int progress = -1;
-        while (SystemClock.elapsedRealtime() < deadline) {
-            AtomicInteger value = new AtomicInteger(-1);
-            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> value.set(web.getProgress()));
-            progress = value.get();
-            if (progress == 100) return;
-            Thread.sleep(250);
-        }
-        fail("Shell document never finished loading (progress=" + progress + ", url=" + url(web) + ")");
     }
 
     private static void awaitCondition(WebView web, String expression) throws Exception {
@@ -102,12 +111,6 @@ public class OfflineShellTest {
             }
             Thread.sleep(250);
         }
-    }
-
-    private static String url(WebView web) {
-        AtomicReference<String> value = new AtomicReference<>("?");
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> value.set(web.getUrl()));
-        return value.get();
     }
 
     /** A missing callback means the renderer is wedged; fail here instead of queuing more work. */

@@ -41,6 +41,7 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private String host;
+    private String lastUrl;
     private boolean backPending;
     private long exitBackAt;
     private Toast exitToast;
@@ -99,7 +100,20 @@ public class MainActivity extends Activity {
             }
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                lastUrl = url;
                 resetExit();
+            }
+            @Override
+            public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                // A crashed renderer (memory pressure, driver faults) would otherwise take the
+                // whole application down. Drop the dead WebView and rebuild the shell in place.
+                if (view != web) return true;
+                ViewParent parent = view.getParent();
+                if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(view);
+                view.destroy();
+                web = null;
+                runOnUiThread(() -> { if (!isFinishing() && !isDestroyed()) showShell(null); });
+                return true;
             }
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
@@ -122,7 +136,7 @@ public class MainActivity extends Activity {
 
         // restoreState restores history, not display data. Always load the APK
         // document after process recreation, preserving its hash route when possible.
-        String savedUrl = savedInstanceState == null ? null : savedInstanceState.getString(SAVED_URL);
+        String savedUrl = savedInstanceState == null ? lastUrl : savedInstanceState.getString(SAVED_URL);
         Uri saved = savedUrl == null ? null : Uri.parse(savedUrl);
         web.loadUrl(saved != null && shell.sameOrigin(saved) && saved.getPath() != null
             && saved.getPath().startsWith(BundledShell.PREFIX) ? savedUrl : shell.home());
