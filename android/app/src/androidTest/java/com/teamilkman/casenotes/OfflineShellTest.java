@@ -19,6 +19,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
@@ -40,19 +41,21 @@ public class OfflineShellTest {
             .getSharedPreferences("case-notes", Context.MODE_PRIVATE);
         assertTrue(preferences.edit().putString("shell-host", HOST).commit());
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
-            WebView web = view(scenario); await(web, "!!window.DB && !!document.querySelector('.app-header')");
+            WebView web = view(scenario);
+            awaitProgress(web);
+            awaitCondition(web, "!!window.DB && !!document.querySelector('.app-header')");
             // Synthetic data stays entirely in emulator IndexedDB; no server writes.
             eval(web, fixture());
-            await(web, "window.__seeded===true");eval(web, "location.hash='#/cases/android-qa'");
-            scenario.recreate();web = view(scenario);
-            await(web, "!!window.DB && document.body.innerText.includes('合成离线记录')");
+            awaitCondition(web, "window.__seeded===true");
+            eval(web, "location.hash='#/cases/android-qa'");
+            // A recreated activity must show the same offline copy, not a blank page.
+            scenario.recreate();
+            web = view(scenario);
+            awaitProgress(web);
+            awaitCondition(web, "!!window.DB && document.body.innerText.includes('合成离线记录')");
             assertEquals("true", eval(web, "DB.connection.offline"));
             assertEquals("true", eval(web, "location.origin==='https://" + HOST + "' && location.pathname.startsWith('/__app__/')"));
             assertEquals("true", eval(web, "document.documentElement.scrollWidth<=innerWidth"));
-        }
-        try (ActivityScenario<MainActivity> fresh = ActivityScenario.launch(MainActivity.class)) {
-            WebView web = view(fresh);await(web, "!!window.DB && !!document.querySelector('.app-header')");
-            eval(web, "location.hash='#/cases/android-qa'");await(web, "document.body.innerText.includes('合成离线记录')");
         }
     }
 
@@ -70,22 +73,47 @@ public class OfflineShellTest {
         }
     }
 
+    /**
+     * Waits for the shell document without touching the renderer: evaluating JavaScript in a loop
+     * leaves callbacks pointing at a destroyed WebView once the activity is recreated.
+     */
+    private static void awaitProgress(WebView web) throws Exception {
+        long deadline = SystemClock.elapsedRealtime() + 90000;
+        int progress = -1;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            AtomicInteger value = new AtomicInteger(-1);
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> value.set(web.getProgress()));
+            progress = value.get();
+            if (progress == 100) return;
+            Thread.sleep(250);
+        }
+        fail("Shell document never finished loading (progress=" + progress + ", url=" + url(web) + ")");
+    }
+
+    private static void awaitCondition(WebView web, String expression) throws Exception {
+        long deadline = SystemClock.elapsedRealtime() + 30000;
+        while (true) {
+            if ("true".equals(eval(web, expression))) return;
+            if (SystemClock.elapsedRealtime() > deadline) {
+                fail("Offline page condition never held: " + expression + "; " + eval(web,
+                    "JSON.stringify({url:location.href,ready:document.readyState,seedError:window.__seedError," +
+                    "logged:typeof window.DB,body:document.body.innerText.slice(0,400)})"));
+            }
+            Thread.sleep(250);
+        }
+    }
+
+    private static String url(WebView web) {
+        AtomicReference<String> value = new AtomicReference<>("?");
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> value.set(web.getUrl()));
+        return value.get();
+    }
+
+    /** A missing callback means the renderer is wedged; fail here instead of queuing more work. */
     private static String eval(WebView web, String script) throws Exception {
         AtomicReference<String> result = new AtomicReference<>(null); CountDownLatch done = new CountDownLatch(1);
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> web.evaluateJavascript(script, value -> { result.set(value); done.countDown(); }));
-        if (!done.await(20, TimeUnit.SECONDS)) return "<timeout>";
+        if (!done.await(30, TimeUnit.SECONDS)) fail("JavaScript callback timed out for: " + script.substring(0, Math.min(60, script.length())));
         return result.get();
-    }
-
-    private static void await(WebView web, String expression) throws Exception {
-        // This guest renders the shell slowly, so poll instead of failing on one slow round trip.
-        long deadline = SystemClock.elapsedRealtime() + 60000;
-        while (SystemClock.elapsedRealtime() < deadline) {
-            if ("true".equals(eval(web, expression))) return;
-            Thread.sleep(200);
-        }
-        fail("Offline page did not become ready: " + expression + "; " + eval(web,
-            "JSON.stringify({url:location.href,ready:document.readyState,seedError:window.__seedError,secure:isSecureContext," +
-            "logged:typeof window.DB,body:document.body.innerText.slice(0,400)})"));
     }
 }

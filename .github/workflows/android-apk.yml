@@ -89,6 +89,13 @@ jobs:
             echo "===== $file"
             tail -n 120 "$file"
           done
+      - name: Preserve isolated Android failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-offline-failure
+          path: android/app/build/outputs/androidTest-results/
+          if-no-files-found: ignore
       - name: Decode signing keystore
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
