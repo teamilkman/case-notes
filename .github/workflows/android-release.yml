@@ -1,0 +1,81 @@
+name: Release Android APK
+
+# Delivery only: build, sign and publish. The emulator quality gate lives in the
+# separate Build Android APK workflow so a flaky emulator node cannot delay it.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "public/**"
+      - "tools/pack-android-shell.mjs"
+      - "tools/vendor-dexie.mjs"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: build-tools;34.0.0
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: 8.10.2
+      - name: Decode signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo 'Missing ANDROID_KEYSTORE_BASE64 secret'; exit 1
+          fi
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+      - name: Build signed APKs
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          gradle :app:assembleDebug :app:assembleRelease --project-dir android
+          cp android/app/build/outputs/apk/debug/app-debug.apk case-notes-debug.apk
+          cp android/app/build/outputs/apk/release/app-release.apk case-notes-release.apk
+          ls -lh case-notes-debug.apk case-notes-release.apk
+      - name: Verify release signature
+        run: |
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs case-notes-release.apk
+      - uses: actions/upload-artifact@v7
+        with:
+          name: case-notes-apk
+          path: |
+            case-notes-debug.apk
+            case-notes-release.apk
+      - name: Publish to rolling Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: android-latest
+          name: Android APK (latest)
+          body: |
+            main 分支滚动构建，提交 `${{ github.sha }}`。
+            下载 `case-notes-release.apk` 使用新包名安装；后续版本可覆盖升级（固定签名）；`case-notes-debug.apk` 为调试包。
+          make_latest: false
+          files: |
+            case-notes-release.apk
+            case-notes-debug.apk

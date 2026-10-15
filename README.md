@@ -78,7 +78,8 @@ AI 查询使用只读排序键游标，不创建或清理持久快照。每页�
 | `tools/` | 环境初始化、部署配置渲染、本地备份、域名配置与线上核验 |
 | `android/` | 安卓 Web 套壳：单 WebView 打开本机填写的服务器域名，包名 `com.teamilkman.casenotes` |
 | `.github/workflows/deploy.yml` | 检查与 CI 发布流程 |
-| `.github/workflows/android-apk.yml` | 安卓 APK 的 CI 打包与 Release 发布流程 |
+| `.github/workflows/android-apk.yml` | 安卓 APK 的 CI 构建、单元测试与模拟器质量核验，不阻塞发布 |
+| `.github/workflows/android-release.yml` | 安卓 APK 的签名与 `android-latest` Release 发布 |
 
 ## 安卓应用（Web 套壳）
 
@@ -88,7 +89,7 @@ AI 查询使用只读排序键游标，不创建或清理持久快照。每页�
 
 ### 出包与签名
 
-发新包时在 `android/app/build.gradle` 同步递增 `versionCode`。出包走 CI：`main` 上安卓代码、公共框架、打包脚本或 npm 依赖变化触发 `Build Android APK`，也可手动运行；先构建调试包并跑 JVM 单元测试，再在关闭全部网络的模拟器上核验框架冷启动、活动重建与合成 IndexedDB 副本读取（失败会在新模拟器上重试一次），`main` 上最后签名并发布 `android-latest` Release 的 `case-notes-release.apk`，PR 只构建与测试、不签名、不发布。壳的路径、MIME 与放行规则由 `BundledShellTest`（Robolectric）覆盖，`tests/android-shell.test.ts` 覆盖打包资源图与 `/__app__/` 路径；模拟器核验使用合成域名，仓库与 APK 内都不含真实部署地址。
+发新包时在 `android/app/build.gradle` 同步递增 `versionCode`。出包走 CI，两条工作流分离：`Build Android APK` 在 PR 和 main 上构建调试包、跑 JVM 单元测试，并在关闭全部网络的模拟器上核验框架冷启动、活动重建与合成 IndexedDB 副本读取（失败会在新模拟器上重试一次），它是质量信号，不阻塞发布；`Release Android APK` 在 main 上签名并发布 `android-latest` Release 的 `case-notes-release.apk`，不含模拟器，PR 不触发。壳的路径、MIME 与放行规则由 `BundledShellTest`（Robolectric）覆盖，`tests/android-shell.test.ts` 覆盖打包资源图与 `/__app__/` 路径；模拟器核验使用合成域名，仓库与 APK 内都不含真实部署地址。
 
 安卓应用 ID 已统一为 `com.teamilkman.casenotes`。从旧应用迁移时需要安装为新应用并重新登录，云端案件和日志继续保留；后续同包名版本可覆盖升级。Release 包用固定密钥签名以保证后续覆盖升级。密钥由 `ANDROID_KEYSTORE_BASE64`、`ANDROID_STORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 四个 GitHub Secret 提供，本地副本存在 `backups/`（已被忽略，不进版本库，勿外泄）。本地无密钥时 `assembleRelease` 产出未签名包，仅 CI 可出可安装的 release 包。
 

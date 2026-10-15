@@ -1,5 +1,8 @@
 name: Build Android APK
 
+# Quality gate only: build, unit tests and the offline emulator check. It never
+# signs or publishes; that lives in the separate release workflow so a flaky
+# emulator node cannot delay a release.
 on:
   workflow_dispatch:
   pull_request:
@@ -23,14 +26,12 @@ on:
       - ".github/workflows/android-apk.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    outputs:
-      offline-check-failed: ${{ steps.verdict.outputs.failed }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -61,8 +62,8 @@ jobs:
       # The packaged shell must render with no network at all, including after the
       # activity (and its WebView) is recreated. The retry step re-runs the check on
       # a fresh emulator only when this attempt failed; `continue-on-error` keeps the
-      # job running, and a marker file carries the verdict to the retry condition
-      # because `outcome` is unreliable on steps with `continue-on-error`.
+      # job running, and the verdict step carries the decision because `outcome` is
+      # unreliable on steps with `continue-on-error`.
       - name: Verify APK cold start without network
         id: offline-cold-start
         continue-on-error: true
@@ -98,8 +99,8 @@ jobs:
         id: verdict
         if: always()
         run: |
-          # `outcome` keeps the raw failure on a continue-on-error step, while
-          # `conclusion` reports the tolerated success; gate the retry on the raw value.
+          # `conclusion` reports the tolerated success on a continue-on-error step,
+          # while `outcome` keeps the raw value; gate the retry on the raw value.
           if test "${{ steps.offline-cold-start.conclusion }}" = success; then
             echo "failed=false" >> "$GITHUB_OUTPUT"
           else
@@ -133,48 +134,3 @@ jobs:
             android/app/build/outputs/androidTest-results/
             android/app/build/outputs/androidTest-results/connected/full-logcat.txt
           if-no-files-found: ignore
-      - name: Decode signing keystore
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "Missing ANDROID_KEYSTORE_BASE64 secret"; exit 1
-          fi
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-      - name: Assemble APKs
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        env:
-          KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
-          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          gradle :app:assembleDebug :app:assembleRelease --project-dir android
-          cp android/app/build/outputs/apk/debug/app-debug.apk case-notes-debug.apk
-          cp android/app/build/outputs/apk/release/app-release.apk case-notes-release.apk
-          ls -lh case-notes-debug.apk case-notes-release.apk
-      - name: Verify release signature
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        run: |
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs case-notes-release.apk
-      - uses: actions/upload-artifact@v7
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        with:
-          name: case-notes-apk
-          path: |
-            case-notes-debug.apk
-            case-notes-release.apk
-      - name: Publish to rolling Release
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: android-latest
-          name: Android APK (latest)
-          body: |
-            main 分支滚动构建，提交 `${{ github.sha }}`。
-            下载 `case-notes-release.apk` 使用新包名安装；后续版本可覆盖升级（固定签名）；`case-notes-debug.apk` 为调试包。
-          make_latest: false
-          files: |
-            case-notes-release.apk
-            case-notes-debug.apk
