@@ -2,11 +2,14 @@ package com.teamilkman.casenotes;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.DownloadManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.SystemClock;
 import android.text.InputType;
 import android.view.ViewGroup;
@@ -28,8 +31,10 @@ import android.widget.TextView;
 import android.widget.Toast;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
+import androidx.core.content.FileProvider;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -45,12 +50,14 @@ public class MainActivity extends Activity {
     private static final String SAVED_URL = "case-notes:url";
     private static final String RELEASES = "https://api.github.com/repos/teamilkman/case-notes/releases/tags/android-latest";
     private static final String RELEASE_PAGE = "https://github.com/teamilkman/case-notes/releases/tag/android-latest";
+    private static final String APK_URL = "https://github.com/teamilkman/case-notes/releases/download/android-latest/case-notes-release.apk";
 
     private WebView web;
     private String host;
     private String lastUrl;
     private boolean backPending;
     private long exitBackAt;
+    private long lastDownloadId;
     private Toast exitToast;
     private OnBackInvokedCallback systemBack;
 
@@ -65,7 +72,17 @@ public class MainActivity extends Activity {
         if (host == null) showSetup("请输入你自己的服务器域名，例如 example.com。地址只保存在本机，应用内不含任何服务器地址。");
         else {
             showShell(savedInstanceState);
+            requestNotificationPermission();
             checkForUpdate();
+        }
+    }
+
+    /** Download progress and completion are shown by the system download notification. */
+    private void requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 1);
         }
     }
 
@@ -76,6 +93,27 @@ public class MainActivity extends Activity {
         // page entry used by reconnect: silent when unchanged, refresh on change.
         if (web != null && !isFinishing() && !isDestroyed()) {
             web.evaluateJavascript("window.DB&&window.DB.resume&&window.DB.resume()", null);
+        }
+        // A finished update downloaded earlier but not yet installed can be
+        // installed with one tap; the notification offers the same action.
+        if (lastDownloadId > 0) {
+            DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            if (manager != null) {
+                try (Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(lastDownloadId))) {
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+                        String reason = cursor.getString(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
+                        if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                            lastDownloadId = 0;
+                            Toast.makeText(this, "新版本已下载完成，点击安装。", Toast.LENGTH_LONG).show();
+                            installDownloadedUpdate();
+                        } else if (status == DownloadManager.STATUS_FAILED) {
+                            lastDownloadId = 0;
+                            Toast.makeText(this, "下载失败（" + (reason == null ? "未知原因" : reason) + "），可在下载页面手动下载。", Toast.LENGTH_LONG).show();
+                        }
+                    }
+                } catch (Exception ignored) { }
+            }
         }
     }
 
@@ -118,8 +156,9 @@ public class MainActivity extends Activity {
                 if (isFinishing() || isDestroyed() || web == null) return;
                 new AlertDialog.Builder(this)
                     .setTitle("发现新版本 " + newer)
-                    .setMessage("已有可下载的新版本，是否前往下载页面？")
-                    .setPositiveButton("前往下载", (dialog, which) -> {
+                    .setMessage("直接下载并安装新版本？")
+                    .setPositiveButton("下载安装", (dialog, which) -> downloadUpdate())
+                    .setNeutralButton("打开下载页面", (dialog, which) -> {
                         try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASE_PAGE))); }
                         catch (Exception ignored) { }
                     })
@@ -136,6 +175,56 @@ public class MainActivity extends Activity {
             while ((count = stream.read(buffer)) != -1) bytes.write(buffer, 0, count);
         }
         return bytes.toString("UTF-8");
+    }
+
+    /**
+     * In-app download via the system DownloadManager (progress in the notification
+     * shade), then a click on the finished notification or this app's button starts
+     * the package installer. The release page stays as a manual fallback.
+     */
+    private void downloadUpdate() {
+        DownloadManager.Request request;
+        try {
+            request = new DownloadManager.Request(Uri.parse(APK_URL))
+                .setTitle("案记新版本")
+                .setDescription("正在下载更新…")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setMimeType("application/vnd.android.package-archive")
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "case-notes-release.apk");
+        } catch (Exception error) { openReleasePage(); return; }
+        DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+        if (manager == null) { openReleasePage(); return; }
+        try {
+            lastDownloadId = manager.enqueue(request);
+            Toast.makeText(this, "已开始下载，完成后在通知中点击安装。", Toast.LENGTH_LONG).show();
+        } catch (Exception error) { openReleasePage(); }
+    }
+
+    private void openReleasePage() {
+        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASE_PAGE))); }
+        catch (Exception ignored) { }
+    }
+
+    /** Installs a finished in-app download, falling back to the release page. */
+    private void installDownloadedUpdate() {
+        if (lastDownloadId <= 0 || isFinishing() || isDestroyed()) return;
+        DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+        if (manager == null) return;
+        try (Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(lastDownloadId))) {
+            if (cursor == null || !cursor.moveToFirst()) return;
+            int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+            if (status != DownloadManager.STATUS_SUCCESSFUL) return;
+            String local = cursor.getString(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI));
+            if (local == null) return;
+            try {
+                Uri uri = Uri.parse(local);
+                Uri install = "file".equals(uri.getScheme()) ? FileProvider.getUriForFile(this,
+                    getPackageName() + ".update", new File(uri.getPath())) : uri;
+                Intent intent = new Intent(Intent.ACTION_INSTALL_PACKAGE, install)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(intent);
+            } catch (Exception error) { openReleasePage(); }
+        } catch (Exception ignored) { }
     }
 
     /** Reads the versionCode that the release workflow writes into the release body. */
