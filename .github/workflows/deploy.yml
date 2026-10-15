@@ -68,6 +68,13 @@ jobs:
         if: env.WEB_PASSWORD != ''
         run: |
           node -e 'process.stdout.write(JSON.stringify({WEB_PASSWORD:process.env.WEB_PASSWORD}))' | npx wrangler secret bulk --config .wrangler/staged-worker.json
+      - name: Mask deployment addresses in logs
+        run: |
+          node -e '(async()=>{const account=process.env.CLOUDFLARE_ACCOUNT_ID,token=process.env.CLOUDFLARE_API_TOKEN;
+            const response=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/workers/subdomain`,{headers:{Authorization:`Bearer ${token}`}});
+            const body=await response.json(),subdomain=body.result?.subdomain;
+            if(subdomain)console.log(`::add-mask::https://case-notes.${subdomain}.workers.dev`);
+            if(process.env.DEPLOYMENT_URL)console.log(`::add-mask::${new URL(process.env.DEPLOYMENT_URL).origin}`);})()'
       - name: Deploy Worker
         run: npm run deploy -- --config .wrangler/staged-worker.json
       - name: Verify or bind custom domain
