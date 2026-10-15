@@ -48,6 +48,47 @@ jobs:
           gradle-version: 8.10.2
       - name: Build and test the debug variant
         run: gradle :app:assembleDebug :app:testDebugUnitTest --project-dir android
+      # The packaged shell must render with no network at all, including after the
+      # activity (and its WebView) is recreated. Two attempts run because this guest
+      # occasionally stops servicing adb mid-test on a fresh runner image.
+      - name: Verify APK cold start without network
+        id: offline-cold-start
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        with: &offline-check
+          api-level: 34
+          # An Automated Test Device image drops GMS, the bundled UI apps and SystemUI,
+          # which keeps the guest small enough to finish the recreation step.
+          target: aosp_atd
+          arch: x86_64
+          profile: Nexus S
+          heap-size: 512M
+          # `ram-size` lands in hw.ramSize as written and is rejected by this image, so
+          # the emulator flag sets the guest memory instead.
+          emulator-options: -no-window -gpu swiftshader_indirect -feature -Vulkan -no-snapshot -noaudio -no-boot-anim -no-metrics -memory 4096
+          emulator-boot-timeout: 300
+          disable-animations: true
+          disable-spellchecker: true
+          script: |
+            # An ATD image has no telephony stack, so disabling mobile data returns
+            # non-zero; the test itself asserts that no network is active.
+            adb shell svc wifi disable || true
+            adb shell svc data disable || true
+            adb shell cmd connectivity airplane-mode enable || true
+            gradle :app:connectedDebugAndroidTest --project-dir android
+      - name: Verify APK cold start without network (retry)
+        if: steps.offline-cold-start.outcome == 'failure'
+        uses: reactivecircus/android-emulator-runner@v2
+        with: *offline-check
+      - name: Report Android test failures inline
+        if: failure()
+        run: |
+          shopt -s nullglob
+          for file in android/app/build/outputs/androidTest-results/connected/debug/*.xml \
+                      android/app/build/outputs/androidTest-results/connected/debug/*/testlog/test-results.log; do
+            echo "===== $file"
+            tail -n 120 "$file"
+          done
       - name: Decode signing keystore
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
