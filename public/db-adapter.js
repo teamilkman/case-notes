@@ -90,6 +90,25 @@ async function ensureOnline(){
   await ensureSession();
   if(connection.offline)throw new Error('离线时只可查看本地缓存，请联网后再操作。');
 }
+// Cold start adopts the on-disk session before the first read so stale replicas
+// can display at once instead of waiting for a network timeout; the same queue
+// orders this ahead of later reads. Verification still runs once per page load
+// in the background (shared with reads), and only an actual workspace change
+// refreshes the current views.
+if(persistent)void persistent.resumeOffline().catch(()=>{});
+void (async()=>{
+  if(!persistent||typeof window==='undefined')return;
+  try{
+    const before=(await persistent.read('__cold_probe__'))?.token;
+    await ensureSession();
+    const after=(await persistent.read('__cold_probe__'))?.token;
+    const changed=!before||!after||before.scope!==after.scope||before.epoch!==after.epoch||(before.change??null)!==(after.change??null);
+    if(before&&after&&changed){
+      invalidateReads(undefined,false);
+      window.dispatchEvent(new Event('case-notes:reconnected'));
+    }
+  }catch{}
+})();
 if(typeof window!=='undefined'){
   window.addEventListener('offline',()=>{connection.offline=true;});
   window.addEventListener('online',reconnect);
