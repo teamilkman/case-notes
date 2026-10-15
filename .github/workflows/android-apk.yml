@@ -92,7 +92,9 @@ jobs:
         id: verdict
         if: always()
         run: |
-          if test "${{ steps.offline-cold-start.outcome }}" = success; then
+          # `outcome` keeps the raw failure on a continue-on-error step, while
+          # `conclusion` reports the tolerated success; gate the retry on the raw value.
+          if test "${{ steps.offline-cold-start.conclusion }}" = success; then
             echo "failed=false" >> "$GITHUB_OUTPUT"
           else
             echo "failed=true" >> "$GITHUB_OUTPUT"
