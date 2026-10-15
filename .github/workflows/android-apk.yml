@@ -49,8 +49,9 @@ jobs:
       - name: Build and test the debug variant
         run: gradle :app:assembleDebug :app:testDebugUnitTest --project-dir android
       # The packaged shell must render with no network at all, including after the
-      # activity (and its WebView) is recreated. Two attempts run because this guest
-      # occasionally stops servicing adb mid-test on a fresh runner image.
+      # activity (and its WebView) is recreated. The check itself is retried on a
+      # fresh emulator only when the first attempt fails; `continue-on-error` keeps
+      # the job running so the retry step can decide the outcome.
       - name: Verify APK cold start without network
         id: offline-cold-start
         continue-on-error: true
@@ -78,6 +79,8 @@ jobs:
             gradle :app:connectedDebugAndroidTest --project-dir android
       - name: Verify APK cold start without network (retry)
         if: steps.offline-cold-start.outcome == 'failure'
+        id: offline-cold-start-retry
+        continue-on-error: false
         uses: reactivecircus/android-emulator-runner@v2
         with: *offline-check
       - name: Report Android test failures inline
