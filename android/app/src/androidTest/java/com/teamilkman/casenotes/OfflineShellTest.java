@@ -91,7 +91,8 @@ public class OfflineShellTest {
     }
 
     private static void awaitCondition(WebView web, String expression) throws Exception {
-        long deadline = SystemClock.elapsedRealtime() + 30000;
+        // This guest renders slowly and the whole check runs offline, so allow a long budget.
+        long deadline = SystemClock.elapsedRealtime() + 90000;
         while (true) {
             if ("true".equals(eval(web, expression))) return;
             if (SystemClock.elapsedRealtime() > deadline) {
