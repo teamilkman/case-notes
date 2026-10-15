@@ -95,6 +95,10 @@ export function createPersistentCache({name='case-notes-reads-v3',isOffline=()=>
         const token={scope,epoch:state.epoch,change:state.changeToken??null};
         const row=await db.responses.get(key);
         if(row&&fresh(state,row))return {hit:true,data:row.data,token};
+        // A stale replica stays on disk for offline reading. Return it as stale
+        // so the caller can display the old cache with a loading state first and
+        // judge offline only after the network attempt finishes.
+        if(row)return {hit:false,token,stale:row.data};
         return {hit:false,token};
       }));
     },

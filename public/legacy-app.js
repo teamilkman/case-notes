@@ -519,6 +519,7 @@ app.component('calendar-view', {
     today(){ return todayStr(); },
     cal(){ return this.$state.cal; },
     calendarLoading(){return !this.calendarEntry.loaded&&!this.calendarEntry.error;},
+    calendarSyncing(){return this.calendarEntry.loaded&&this.calendarEntry.loading;},
     calendarUnavailable(){return !this.calendarEntry.loaded;},
     calendarError(){return this.calendarEntry.error;},
     dateCounts(){return this.calendarEntry.data?.dateCounts||this.lastDateCounts||{};},

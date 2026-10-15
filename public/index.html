@@ -164,8 +164,8 @@
             <div class="cal-arrows"><button class="nav" aria-label="上个月" @click="nav(-1)">‹</button><button class="nav" aria-label="下个月" @click="nav(1)">›</button></div>
           </div>
         </div>
-        <div class="cal-month-meta" :aria-busy="calendarLoading">
-          <span v-if="!calendarUnavailable">本月 <b>{{ monthSummary.hearings }}</b> 场开庭<span class="cal-meta-sep">·</span>分布于 <b>{{ monthSummary.days }}</b> 天</span>
+        <div class="cal-month-meta" :aria-busy="calendarLoading||calendarSyncing">
+          <span v-if="!calendarUnavailable">本月 <b>{{ monthSummary.hearings }}</b> 场开庭<span class="cal-meta-sep">·</span>分布于 <b>{{ monthSummary.days }}</b> 天<span v-if="calendarSyncing"> · 正在同步…</span></span>
           <span v-else>{{ calendarError ? '本月日程读取失败' : '正在读取本月日程…' }}</span>
           <span class="cal-key-hint">{{ $state.mobile?'左右滑动换月':'方向键选日期' }}</span>
         </div>
@@ -192,12 +192,12 @@
           <span v-if="visible&&page!=='current'&&!monthReady(page)" class="month-preview-state">日程待加载</span>
           </template>
           </page-deck>
-          <div v-if="calendarLoading||calendarError" class="calendar-state" :class="{'is-error':calendarError}" role="status" aria-live="polite"><template v-if="calendarLoading"><span class="loading-dot" aria-hidden="true"></span><span>正在加载 {{ calTitle }} 的开庭日程…</span></template><template v-else><span>{{ calTitle }}的日程加载失败：{{ calendarError }}</span><button class="mini-btn" @click="loadCalendar(true)">重试</button></template></div>
+          <div v-if="calendarLoading||calendarSyncing||calendarError" class="calendar-state" :class="{'is-error':calendarError}" role="status" aria-live="polite"><template v-if="calendarLoading||calendarSyncing"><span class="loading-dot" aria-hidden="true"></span><span>{{ calendarSyncing ? '正在同步 '+calTitle+' 的开庭日程…' : '正在加载 '+calTitle+' 的开庭日程…' }}</span></template><template v-else><span>{{ calTitle }}的日程加载失败：{{ calendarError }}</span><button class="mini-btn" @click="loadCalendar(true)">重试</button></template></div>
         </div>
         <div class="cal-legend"><span class="lg"><i class="dot st-in"></i>在办</span><span class="lg"><i class="dot st-done"></i>结案</span><span class="lg"><i class="dot st-pend"></i>结案未整卷</span><span class="cal-legend-note">点击日程打开案件</span></div>
       </section>
       <aside class="cal-detail" tabindex="-1" aria-label="选中日期的开庭安排" :aria-busy="calendarLoading">
-        <div class="cal-detail-head"><p class="cal-eyebrow">当日安排<span v-if="cal.sel===today" class="cal-today-pill">今天</span></p><h3 class="detail-title">{{ detailTitle }}</h3><span class="cal-day-count" v-if="!calendarUnavailable">{{ dayHearings.length }} 场开庭</span></div>
+        <div class="cal-detail-head"><p class="cal-eyebrow">当日安排<span v-if="cal.sel===today" class="cal-today-pill">今天</span></p><h3 class="detail-title">{{ detailTitle }}</h3><span class="cal-day-count" v-if="!calendarUnavailable">{{ dayHearings.length }} 场开庭<span v-if="calendarSyncing"> · 同步中</span></span></div>
         <div class="cal-agenda" aria-live="polite">
           <loading-skeleton v-if="calendarLoading" :rows="2" label="正在加载当日安排"></loading-skeleton>
           <div class="cal-day-empty" v-else-if="calendarError"><span class="cal-empty-icon" aria-hidden="true">…</span><h4>暂时无法显示安排</h4><p>请重试本月日程读取</p></div>
@@ -315,7 +315,7 @@
           <div class="c-meta"><status-badge :st="sel.状态"></status-badge><div><span>案由</span><b>{{ sel.案由||'未填写' }}</b></div><div><span>案号</span><b>{{ sel.案号||'未填写' }}</b></div><div><span>法院</span><b>{{ sel.法院||'未填写' }}</b></div></div>
           <div class="c-dates">创建 {{ sel.创建||'-' }} ｜ 最近活动 {{ sel.最近活动||'-' }}</div>
         </div>
-        <div class="notes-head"><h3>{{ editing?'编辑笔记':'工作记录' }}</h3><span v-if="editing" class="edit-state">{{ saving?'正在保存…':editText!==mdText?'有未保存的修改':'编辑模式' }}</span><span v-else-if="dbDoc?.case?.status!=='在办'" class="readonly-note"><ui-icon name="lock"></ui-icon>归档笔记只读</span></div>
+        <div class="notes-head"><h3>{{ editing?'编辑笔记':'工作记录' }}</h3><span v-if="editing" class="edit-state">{{ saving?'正在保存…':editText!==mdText?'有未保存的修改':'编辑模式' }}</span><span v-else-if="mdLoading&&mdText" class="edit-state">正在同步…</span><span v-else-if="dbDoc?.case?.status!=='在办'" class="readonly-note"><ui-icon name="lock"></ui-icon>归档笔记只读</span></div>
         <template v-if="!editing">
           <div class="case-content">
           <loading-skeleton v-if="mdLoading&&!mdText" kind="notes" :rows="5" label="正在加载案件笔记"></loading-skeleton>

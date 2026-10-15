@@ -1,8 +1,13 @@
 // Memory owns reactive state and shared requests; optional persistence owns only
 // disposable responses. Failed reads can retry, and stale completions cannot prime.
+// Offline judgement happens after the cache: a stale replica is displayed with a
+// loading state first; a successful network read completes it, while a network or
+// offline-auth failure keeps the existing offline copy.
 export function createReadCache(wrap=value=>value,maxEntries=128,persistence=null){
   const entries=new Map();
   function trim(protectedKey){while(entries.size>maxEntries){const candidate=[...entries].find(([key,entry])=>key!==protectedKey&&!entry.loading);if(!candidate)break;entries.delete(candidate[0]);}}
+  const offlineError=error=>['NETWORK_UNAVAILABLE','OFFLINE_AUTH_REQUIRED'].includes(error?.code);
+  const missingCopy=error=>Object.assign(new Error(error?.code==='OFFLINE_AUTH_REQUIRED'?'此内容尚未缓存，请登录后读取。':'网络不可用，此内容尚未缓存，请联网后重试。'),{code:error?.code,retryable:error?.retryable});
   return {
     entry(key){
       if(entries.has(key)){const value=entries.get(key);entries.delete(key);entries.set(key,value);return value;}
@@ -16,16 +21,45 @@ export function createReadCache(wrap=value=>value,maxEntries=128,persistence=nul
             const stored=await persistence.read(key);token=stored?.token;fromPersistence=!!stored?.hit;
             if(sequence!==this.sequence)throw new DOMException('Aborted','AbortError');
             if(stored?.hit)return stored.data;
+            const stale=stored?.stale;
+            if(stale!==undefined){
+              // Display the old cache first and keep the loading state for the
+              // network attempt that judges offline afterwards.
+              this.data=stale;this.loaded=true;
+              try{return await load();}catch(error){
+                if(error?.name==='AbortError'||sequence!==this.sequence)throw error;
+                if(!offlineError(error)){
+                  if(sequence===this.sequence){this.data=null;this.loaded=false;}
+                  throw error;
+                }
+                const fallback=await persistence.read(key);
+                if(sequence!==this.sequence)throw new DOMException('Aborted','AbortError');
+                const data=fallback?.hit?fallback.data:(fallback?.stale??stale);
+                if(data===undefined){
+                  if(sequence===this.sequence){this.data=null;this.loaded=false;}
+                  throw missingCopy(error);
+                }
+                fromPersistence=true;return data;
+              }
+            }
             try{return await load();}catch(error){
-              if(!['NETWORK_UNAVAILABLE','OFFLINE_AUTH_REQUIRED'].includes(error.code))throw error;
+              if(error?.name==='AbortError'||!offlineError(error))throw error;
               const fallback=await persistence.read(key);
               if(sequence!==this.sequence)throw new DOMException('Aborted','AbortError');
-              if(!fallback?.hit)throw Object.assign(new Error(error.code==='OFFLINE_AUTH_REQUIRED'?'此内容尚未缓存，请登录后读取。':'网络不可用，此内容尚未缓存，请联网后重试。'),{code:error.code,retryable:error.retryable});
-              fromPersistence=true;return fallback.data;
+              const data=fallback?.hit?fallback.data:fallback?.stale;
+              if(data===undefined)throw missingCopy(error);
+              fromPersistence=true;return data;
             }
           }:load;
-          this.pending=Promise.resolve().then(read).then(data=>{if(sequence===this.sequence){this.data=data;this.loaded=true;
-            if(persistence&&token&&!fromPersistence)void persistence.write(key,data,token);
+          this.pending=Promise.resolve().then(read).then(async data=>{if(sequence===this.sequence){this.data=data;this.loaded=true;
+            if(persistence&&!fromPersistence){
+              try{
+                const latest=await persistence.read(key);
+                if(sequence!==this.sequence)return data;
+                if(latest?.token)void persistence.write(key,data,latest.token);
+                else if(token)void persistence.write(key,data,token);
+              }catch{}
+            }
           }return data;})
             .catch(error=>{if(sequence===this.sequence)this.error=error.message;throw error;})
             .finally(()=>{if(sequence===this.sequence){this.loading=false;this.pending=null;trim(key);}});

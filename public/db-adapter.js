@@ -95,7 +95,11 @@ if(typeof window!=='undefined'){
   window.addEventListener('online',reconnect);
 }
 const cacheKey=(name,args)=>name+':'+JSON.stringify(Object.fromEntries(Object.entries(args).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b))));
-const web=(name,args={},signal)=>withSignal(ensureSession().then(()=>reads.entry(cacheKey(name,args)).ensure(()=>request('/api/web/'+name,args))),signal);
+// Cache first, offline judgement after: the persistent stale replica is displayed
+// with a loading state before the session verification and network read run.
+// A successful network read completes the entry; a network or offline-auth failure
+// keeps the existing offline copy.
+const web=(name,args={},signal)=>withSignal(reads.entry(cacheKey(name,args)).ensure(async()=>{await ensureSession();return request('/api/web/'+name,args);}),signal);
 function pager(name){return createPager((args,signal)=>web(name,{limit:20,...args},signal));}
 export function feed(name,args={}){
   const key=cacheKey(name,args);if(feeds.has(key))return feeds.get(key);
@@ -147,8 +151,8 @@ function rememberDoc(doc){reads.entry('case:'+doc.ref).prime(doc);}
 function invalidateCase(ref){reads.entry('case:'+ref).invalidate();}
 function calendar(y,m){return reads.entry('calendar:'+y+'-'+m);}
 async function readCalendar(y,m){
-  await ensureSession();
   return calendar(y,m).ensure(async()=>{
+    await ensureSession();
     const pad=n=>String(n).padStart(2,'0');
     const args={mode:'future',today:'0001-01-01',from_date:y+'-'+pad(m+1)+'-01',to_date:y+'-'+pad(m+1)+'-'+pad(new Date(y,m+1,0).getDate()),limit:100};
     const [counts,first]=await Promise.all([web('calendar-counts',{}),web('schedules',args)]);
@@ -162,8 +166,7 @@ function todoItem(r){return {案件:r.case_name,文本:r.display_text,行:r.sort
 function eventItem(r){return {line_id:r.line_id,案件:r.case_name,日期:r.event_date,时间:r.event_time,文本:r.display_text.replace(/^\d{4}\.\d{1,2}\.\d{1,2}(?:\s+\d{1,2}:\d{2})?\s*/,''),状态:r.case_status,path:r.case_id};}
 function activityItem(r){return {line_id:r.line_id,path:r.case_id,案件:r.case_name,状态:r.case_kind==='affair'?'事务':r.case_status,标记:r.marker,日期:r.date,时间:r.time,文本:r.display_text.replace(/^\d{4}\.\d{2}\.\d{2}(\s+\d{2}:\d{2})?\s*/,'')};}
 async function readCase(ref){
-  await ensureSession();
-  return reads.entry('case:'+ref).ensure(async()=>{const result=await all('cases_get',{case_ref:ref});return {ref,case:result.case,revision:result.document_revision,lines:result.lines,text:result.lines.map(l=>l.text).join('\n')};});
+  return reads.entry('case:'+ref).ensure(async()=>{await ensureSession();const result=await all('cases_get',{case_ref:ref});return {ref,case:result.case,revision:result.document_revision,lines:result.lines,text:result.lines.map(l=>l.text).join('\n')};});
 }
 export function beginEdit(doc){return {ref:doc.ref,revision:doc.revision,rows:doc.lines.map(l=>({line_id:l.line_id,text:l.text})),text:doc.text,edit:null,draftUnversioned:false,draftNotice:''};}
 export function changeEdit(editor,next){
