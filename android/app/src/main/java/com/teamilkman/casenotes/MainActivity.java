@@ -82,15 +82,9 @@ public class MainActivity extends Activity {
                 connection.setReadTimeout(8000);
                 connection.setRequestProperty("Accept", "application/vnd.github+json");
                 if (connection.getResponseCode() != 200) throw new IOException();
-                org.json.JSONObject release = new org.json.JSONObject(readAll(connection.getInputStream()));
-                for (org.json.JSONObject asset : iterable(release.getJSONArray("assets"))) {
-                    // Asset names are "app-release.apk" (signed) or "case-notes-release.apk".
-                    if (asset.getString("name").endsWith("release.apk")) {
-                        published = parseVersionCode(asset.getString("browser_download_url"));
-                        break;
-                    }
-                }
-                if (published < 0) published = parseVersionCode(release.getString("html_url"));
+                // The release body carries "版本号 <n>"; download URLs cannot carry query
+                // parameters on GitHub, so the body is the only machine-readable source.
+                published = parseVersionCode(new org.json.JSONObject(readAll(connection.getInputStream())).getString("body"));
             } catch (Exception error) { return; } // offline or GitHub unavailable: silently skip
             if (published <= installed) return;
             final long newer = published;
@@ -112,24 +106,11 @@ public class MainActivity extends Activity {
         return bytes.toString("UTF-8");
     }
 
-    private static Iterable<org.json.JSONObject> iterable(org.json.JSONArray array) {
-        return () -> new java.util.Iterator<>() {
-            private int index = 0;
-            @Override public boolean hasNext() { return index < array.length(); }
-            @Override public org.json.JSONObject next() { return array.optJSONObject(index++); }
-        };
-    }
-
-    /**
-     * The release does not embed its version in a machine field, so read it from the
-     * APK download URL, which CI appends as "-v<versionCode>" via the release body.
-     */
+    /** Reads the versionCode that the release workflow writes into the release body. */
     private static long parseVersionCode(String text) {
         java.util.regex.Matcher match = java.util.regex.Pattern
-            .compile("[?&]v=(\\d+)|-v(\\d+)\\.apk").matcher(text == null ? "" : text);
-        if (!match.find()) return -1;
-        String value = match.group(1) != null ? match.group(1) : match.group(2);
-        return value == null ? -1 : Long.parseLong(value);
+            .compile("版本号\\s*(\\d+)").matcher(text == null ? "" : text);
+        return match.find() ? Long.parseLong(match.group(1)) : -1;
     }
 
     private SharedPreferences prefs() { return getSharedPreferences(PREFS, MODE_PRIVATE); }
