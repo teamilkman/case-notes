@@ -85,7 +85,11 @@ function prefetchCalendar(y,m){
 function loadStats(){
   if(statsJob)return statsJob;
   state.statsLoading=true;state.statsError='';const change=state.change;
-  statsJob=DB.web('stats',{today:todayStr()}).then(result=>{if(change===state.change){state.counts=result.counts;state.statsAt=Date.now();}})
+  const args={today:todayStr()};
+  // Display cached counts at once with the loading state; the network read
+  // that follows completes them, an offline failure keeps them.
+  if(DB.peek)void DB.peek('stats',args).then(cached=>{if(cached&&cached.counts&&change===state.change)state.counts=cached.counts;}).catch(()=>{});
+  statsJob=DB.web('stats',args).then(result=>{if(change===state.change){state.counts=result.counts;state.statsAt=Date.now();}})
     .catch(e=>{if(change===state.change)state.statsError=e.message;}).finally(()=>{state.statsLoading=false;statsJob=null;if(change!==state.change)loadStats();});
   return statsJob;
 }

@@ -119,7 +119,16 @@ const cacheKey=(name,args)=>name+':'+JSON.stringify(Object.fromEntries(Object.en
 // A successful network read completes the entry; a network or offline-auth failure
 // keeps the existing offline copy.
 const web=(name,args={},signal)=>withSignal(reads.entry(cacheKey(name,args)).ensure(async()=>{await ensureSession();return request('/api/web/'+name,args);}),signal);
-function pager(name){return createPager((args,signal)=>web(name,{limit:20,...args},signal));}
+// Local-only peek of the same cached page: lists display it at once with a
+// loading state, the network load that follows completes it or keeps it offline.
+async function peekPage(name,args={}){
+  if(!persistent)return null;
+  try{
+    const stored=await persistent.read(cacheKey(name,args));
+    return stored?.hit?stored.data:(stored?.stale??null);
+  }catch{return null;}
+}
+function pager(name){return createPager((args,signal)=>web(name,{limit:20,...args},signal),undefined,(args)=>peekPage(name,{limit:20,...args}));}
 export function feed(name,args={}){
   const key=cacheKey(name,args);if(feeds.has(key))return feeds.get(key);
   const base=pager(name);
@@ -264,4 +273,4 @@ function sanitize(html){
   }
   return doc.body.innerHTML;
 }
-if(typeof window!=='undefined')window.DB={connection,reconnect,web,pager,feed,calendar,readCalendar,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,save,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};
+if(typeof window!=='undefined')window.DB={connection,reconnect,web,pager,peek:peekPage,feed,calendar,readCalendar,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,save,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};
