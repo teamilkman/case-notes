@@ -36,7 +36,7 @@ const rpc=(token:string,method='tools/list',params:any={})=>fetch('/mcp',{method
 async function grant(){const client=await register(),{code}=await approve(client),r=await exchange(client,code);assert.equal(r.status,200,await r.clone().text());return {client,tokens:await r.json() as any};}
 before(async()=>{
   mf=new Miniflare(convertV4MiniflareOptions({name:'oauth-tests',modules:true,scriptPath:resolve('dist/worker.js'),compatibilityDate:'2026-10-01',compatibilityFlags:['nodejs_compat'],telemetry:{enabled:false},resourcePersistencePath:temp,
-    d1Databases:{DB:'business'},bindings:{WEB_PASSWORD:'synthetic-password',API_TOKEN:'synthetic-api-token'},
+    d1Databases:{DB:'business'},bindings:{WEB_PASSWORD:'synthetic-password'},
     assets:{directory:resolve('public'),binding:'ASSETS',run_worker_first:['/api/*','/mcp','/health','/oauth/*','/.well-known/*'],routerConfig:{has_user_worker:true}}}));
   auth=await mf.getD1Database('DB') as unknown as D1Database;
   for(const [db,folder] of [[auth,'migrations/business']] as const)
@@ -94,10 +94,11 @@ test('PKCE, client, callback and resource are bound; atomic redemption permits o
   const initialized=await rpc(tokens.access_token,'initialize',{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'oauth-test',version:'1'}});assert.equal(initialized.status,200);
   const listed=await rpc(tokens.access_token);assert.equal(listed.status,200);assert.equal((await listed.json() as any).result.tools.length,9);
   const searched=await rpc(tokens.access_token,'tools/call',{name:'search',arguments:{result_type:'cases'}});assert.equal((await searched.json() as any).result.structuredContent.ok,true);
-  assert.equal((await fetch('/api/v1/search',{method:'POST',headers:{Authorization:'Bearer '+tokens.access_token},body:'{}'})).status,401);
-  assert.equal((await fetch('/api/web/history',{headers:{Authorization:'Bearer '+tokens.access_token}})).status,401);
+  const rest=await fetch('/api/v1/search',{method:'POST',headers:{Authorization:'Bearer '+tokens.access_token,'Content-Type':'application/json'},body:JSON.stringify({query:'OAuth'})});
+  assert.equal(rest.status,200);assert.equal((await rest.json() as any).ok,true); // one OAuth grant covers REST and MCP
+  assert.equal((await fetch('/api/web/history',{headers:{Authorization:'Bearer '+tokens.access_token}})).status,403); // valid token, web-only route
   const otherHost=await mf.dispatchFetch('https://other.example/mcp',{method:'POST',headers:{Authorization:'Bearer '+tokens.access_token},body:'{}'});assert.equal(otherHost.status,401);
-  assert.equal((await rpc('synthetic-api-token')).status,200);
+  assert.equal((await rpc('synthetic-api-token')).status,401); // the fixed AI token no longer exists
 });
 test('OAuth writes retain client identity and AI permissions in the common service',async()=>{
   const {client,tokens}=await grant();
@@ -125,7 +126,7 @@ test('expiry, revocation and idempotent migration preserve existing sessions and
   const before=(await auth.prepare('SELECT * FROM web_sessions').all()).results;
   await auth.batch(migrationSql('migrations/business/0005_auth_consolidation.sql').map(sql=>auth.prepare(sql)));
   assert.deepEqual((await auth.prepare('SELECT * FROM web_sessions').all()).results,before);
-  const searched=await rpc('synthetic-api-token','tools/call',{name:'search',arguments:{query:'OAuth 合成案'}});assert.equal((await searched.json() as any).result.structuredContent.data.items.length,1);
+  const searched=await rpc((await grant()).tokens.access_token,'tools/call',{name:'search',arguments:{query:'OAuth 合成案'}});assert.equal((await searched.json() as any).result.structuredContent.data.items.length,1);
 });
 test('confidential clients authenticate with their registered method, never with an exposed stored secret',async()=>{
   for(const method of ['client_secret_post','client_secret_basic']){

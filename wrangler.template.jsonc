@@ -27,8 +27,7 @@
     ]
   },
   "vars": {
-    "WORKSPACE_ID": "personal",
-    "API_CLIENT_ID": "ai-default"
+    "WORKSPACE_ID": "personal"
   },
   "d1_databases": [
     {

@@ -14,7 +14,7 @@ async function fixture(run:(source:D1Database,target:D1Database,mf:Miniflare)=>P
   const dir=mkdtempSync(resolve(tmpdir(),'case-notes-auth-merge-'));
   const mf=new Miniflare(convertV4MiniflareOptions({modules:true,scriptPath:resolve('dist/worker.js'),compatibilityDate:'2026-10-01',
     compatibilityFlags:['nodejs_compat'],telemetry:{enabled:false},resourcePersistencePath:dir,
-    d1Databases:{SOURCE:'legacy-auth',DB:'consolidated'},bindings:{WEB_PASSWORD:'synthetic-password',API_TOKEN:'synthetic-api-token'}}));
+    d1Databases:{SOURCE:'legacy-auth',DB:'consolidated'},bindings:{WEB_PASSWORD:'synthetic-password'}}));
   try{
     const source=await mf.getD1Database('SOURCE') as unknown as D1Database,target=await mf.getD1Database('DB') as unknown as D1Database;
     for(const [db,folder] of [[source,'migrations/auth'],[target,'migrations/business']] as const)

@@ -4,9 +4,7 @@ export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
   WEB_PASSWORD?: string;
-  API_TOKEN?: string;
   WORKSPACE_ID?: string;
-  API_CLIENT_ID?: string;
 }
 export interface Principal {
   workspaceId: string;

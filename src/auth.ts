@@ -12,11 +12,8 @@ async function equalSecret(a:string,b:string) {
 export async function authenticate(request:Request,env:Env):Promise<Principal> {
   const workspaceId=env.WORKSPACE_ID??'personal', auth=request.headers.get('Authorization');
   if(auth?.startsWith('Bearer ')) {
-    if(env.API_TOKEN&&await equalSecret(auth.slice(7),env.API_TOKEN))
-      return {workspaceId,clientId:env.API_CLIENT_ID??'ai-default',actorId:'owner',source:'ai'};
-    if(new URL(request.url).pathname==='/mcp'){
-      const principal=await authenticateOAuth(request,env,auth.slice(7));if(principal)return principal;
-    }
+    // Programmatic access is OAuth only; the client identity comes from the grant.
+    const principal=await authenticateOAuth(request,env,auth.slice(7));if(principal)return principal;
     throw new AppError('UNAUTHORIZED','AI 接口令牌无效或已过期，请重新授权。',null,401);
   }
   const current=cookieValue(request,COOKIE),cookie=current??cookieValue(request,previousSessionCookie);

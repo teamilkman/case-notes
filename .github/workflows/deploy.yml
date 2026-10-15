@@ -40,7 +40,6 @@ jobs:
       D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
       REQUIRE_DEPLOYMENT_CONFIG: "1"
       WEB_PASSWORD: ${{ secrets.WEB_PASSWORD }}
-      API_TOKEN: ${{ secrets.CASE_NOTES_API_TOKEN }}
     steps:
       - name: Check deployment credentials
         run: |
@@ -50,9 +49,7 @@ jobs:
           test -n "$DOMAIN" || { echo 'Missing DOMAIN'; exit 1; }
           test -n "$ZONE_ID" || { echo 'Missing ZONE_ID'; exit 1; }
           test -n "$D1_DATABASE_ID" || { echo 'Missing D1_DATABASE_ID'; exit 1; }
-          # Runtime secrets are only re-synced when provided; the deployed values stay otherwise.
-          test -n "$WEB_PASSWORD" || echo 'WEB_PASSWORD unset: keeping the deployed login password.'
-          test -n "$API_TOKEN" || echo 'CASE_NOTES_API_TOKEN unset: keeping the deployed AI token.'
+          test -n "$WEB_PASSWORD" || { echo 'Missing WEB_PASSWORD'; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -68,9 +65,9 @@ jobs:
       - name: Prepare deployment before domain cutover
         run: npx tsx tools/rename-resources.ts --stage-config
       - name: Configure runtime secrets
-        if: env.WEB_PASSWORD != '' && env.API_TOKEN != ''
+        if: env.WEB_PASSWORD != ''
         run: |
-          node -e 'process.stdout.write(JSON.stringify({WEB_PASSWORD:process.env.WEB_PASSWORD,API_TOKEN:process.env.API_TOKEN}))' | npx wrangler secret bulk --config .wrangler/staged-worker.json
+          node -e 'process.stdout.write(JSON.stringify({WEB_PASSWORD:process.env.WEB_PASSWORD}))' | npx wrangler secret bulk --config .wrangler/staged-worker.json
       - name: Deploy Worker
         run: npm run deploy -- --config .wrangler/staged-worker.json
       - name: Verify or bind custom domain

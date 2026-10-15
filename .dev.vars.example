@@ -1,6 +1,5 @@
 # Copy to .dev.vars for local development; do not commit actual secrets.
 WEB_PASSWORD="replace-with-a-long-local-password"
-API_TOKEN="replace-with-a-random-client-token"
 CLOUDFLARE_API_TOKEN="replace-with-a-cloudflare-api-token"
 CLOUDFLARE_ACCOUNT_ID="replace-with-the-cloudflare-account-id"
 DEPLOYMENT_URL="https://replace-with-the-deployed-address"

@@ -34,7 +34,7 @@ type ReadCursor = { format:1; hash:string; version:string; expires:number; total
 function base64(bytes:Uint8Array) { return btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,''); }
 function unbase64(value:string) { return Uint8Array.from(atob(value.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0)); }
 async function signingKey(env:Env) {
-  const secret=env.WEB_PASSWORD??env.API_TOKEN;
+  const secret=env.WEB_PASSWORD;
   if(!secret)throw new AppError('SERVICE_UNAVAILABLE','读取游标配置不可用。',null,503);
   return crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']);
 }

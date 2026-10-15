@@ -4,7 +4,6 @@ const config=JSON.parse(readFileSync('wrangler.jsonc','utf8'));
 const token = process.env.CLOUDFLARE_API_TOKEN;
 const account = process.env.CLOUDFLARE_ACCOUNT_ID;
 if (!token || !account) throw new Error('Missing Cloudflare deployment credentials');
-if (token === process.env.API_TOKEN) throw new Error('Cloudflare deployment credential is the application AI token');
 if (token !== token.trim() || /^Bearer\s/i.test(token)) throw new Error('Cloudflare Secret must contain only the token value');
 const headers = {Authorization: `Bearer ${token}`, 'Content-Type': 'application/json'};
 async function probe(label, path, body) {

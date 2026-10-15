@@ -19,9 +19,9 @@
 
 ## 当前实现
 
-网页会话与 AI Bearer 令牌分别鉴权，REST 与 MCP 调用同一业务服务。MCP 支持 OAuth 登录授权，也兼容原有固定 `API_TOKEN`；OAuth 使用现有网页登录密码或有效网页会话确认授权，不需要第三方账号或新增 Secret。统一数据库 `DB` 用不同表保存日志、网页登录会话与 OAuth 客户端、授权请求及令牌摘要；绑定和静态资源配置见 `wrangler.jsonc`。
+网页会话与 AI OAuth 令牌分别鉴权，REST 与 MCP 调用同一业务服务。AI 访问只通过 OAuth 登录授权，没有固定令牌；OAuth 使用现有网页登录密码或有效网页会话确认授权，不需要第三方账号或新增 Secret。统一数据库 `DB` 用不同表保存日志、网页登录会话与 OAuth 客户端、授权请求及令牌摘要；绑定和静态资源配置见 `wrangler.jsonc`。
 
-OAuth 提供资源与授权服务器发现、动态客户端注册、S256 PKCE 授权码、刷新令牌轮换及撤销。客户端连接 `/mcp` 后通过浏览器明确同意授权；访问令牌有效期 1 小时，授权最多保留 30 天，客户端注册有效期 1 年。授权码有效期 5 分钟且只能兑换一次；重复使用刷新令牌会撤销该授权，客户端应串行续期。令牌绑定连接时的域名、MCP 地址、工作空间及客户端，主域名与备用域名分别授权；OAuth 令牌仅供 MCP 使用，保持 AI 权限与客户端审计身份，不能调用网页专属接口。鉴权表仅保存随机凭证摘要，不保存明文授权码、访问令牌、刷新令牌或客户端密钥；网页登录密码仍由 Secret 配置。公开注册与授权入口限流，过期记录按索引限量清理。
+OAuth 提供资源与授权服务器发现、动态客户端注册、S256 PKCE 授权码、刷新令牌轮换及撤销。客户端连接 `/mcp` 后通过浏览器明确同意授权；访问令牌有效期 1 小时，授权最多保留 30 天，客户端注册有效期 1 年。授权码有效期 5 分钟且只能兑换一次；重复使用刷新令牌会撤销该授权，客户端应串行续期。令牌绑定连接时的域名、MCP 地址、工作空间及客户端，主域名与备用域名分别授权；OAuth 令牌用于 REST 与 MCP，保持 AI 权限与客户端审计身份，不能调用网页专属接口。鉴权表仅保存随机凭证摘要，不保存明文授权码、访问令牌、刷新令牌或客户端密钥；网页登录密码仍由 Secret 配置。公开注册与授权入口限流，过期记录按索引限量清理。
 
 | 数据 | 职责 |
 | --- | --- |
@@ -84,9 +84,9 @@ npm run setup:local
 npm run dev
 ```
 
-`setup:local` 应用本地结构迁移，在 `.dev.vars` 不存在时生成随机网页登录密码和 AI 令牌；不导入日志。已有环境启动只需 `npm run dev`，也可使用 `start.cmd`。`wrangler.jsonc` 由 `tools/render-wrangler.mjs` 从 `wrangler.template.jsonc` 与 `.dev.vars`/环境变量生成，本身不进版本库；`npm run dev`、`npm run build`、`npm run db:migrate` 与部署前都会自动生成一次，本地缺少部署值时使用占位域名。
+`setup:local` 应用本地结构迁移，在 `.dev.vars` 不存在时生成随机网页登录密码；不导入日志。已有环境启动只需 `npm run dev`，也可使用 `start.cmd`。`wrangler.jsonc` 由 `tools/render-wrangler.mjs` 从 `wrangler.template.jsonc` 与 `.dev.vars`/环境变量生成，本身不进版本库；`npm run dev`、`npm run build`、`npm run db:migrate` 与部署前都会自动生成一次，本地缺少部署值时使用占位域名。
 
-网页地址为 `http://127.0.0.1:8787`，MCP 为 `http://127.0.0.1:8787/mcp`。用 `.dev.vars` 中的 `WEB_PASSWORD` 登录；支持 OAuth 的 MCP 客户端可直接连接并在浏览器登录授权，其他客户端继续使用 `API_TOKEN`。更新已有本地环境时运行 `npm run db:migrate` 应用统一数据库迁移。本地数据库身份保持稳定，目录改名时 `.wrangler/` 一起保留。本地库与云端库独立，修改不会自动同步。
+网页地址为 `http://127.0.0.1:8787`，MCP 为 `http://127.0.0.1:8787/mcp`。用 `.dev.vars` 中的 `WEB_PASSWORD` 登录；MCP 客户端通过 OAuth 登录授权后即可连接。更新已有本地环境时运行 `npm run db:migrate` 应用统一数据库迁移。本地数据库身份保持稳定，目录改名时 `.wrangler/` 一起保留。本地库与云端库独立，修改不会自动同步。
 
 ```powershell
 npm run typecheck
@@ -102,15 +102,14 @@ npm test
 | 用途 | 运行时/本地变量 | GitHub Secret |
 | --- | --- | --- |
 | 网页登录 | `WEB_PASSWORD` | `WEB_PASSWORD` |
-| AI API/MCP 鉴权 | `API_TOKEN` | `CASE_NOTES_API_TOKEN` |
 | Cloudflare 部署权限 | `CLOUDFLARE_API_TOKEN` | `CLOUDFLARE_API_TOKEN` |
 | Cloudflare 账户 | `CLOUDFLARE_ACCOUNT_ID` | `CLOUDFLARE_ACCOUNT_ID` |
 | 部署地址与自定义域名 | `DEPLOYMENT_URL`、`DOMAIN` | `DEPLOYMENT_URL`、`DOMAIN` |
 | 区域与数据库标识 | `ZONE_ID`、`D1_DATABASE_ID` | `ZONE_ID`、`D1_DATABASE_ID` |
 
-需要更新 CI 凭证时，`node tools/setup-ci-secrets.mjs` 可将 `.dev.vars` 中对应值提交到 GitHub Secrets，不输出凭证；目标仓库默认 `teamilkman/case-notes`，可用 `CI_REPO` 覆盖。Cloudflare 账户管理凭证与日志应用令牌用途不同。部署地址与标识同样按 Secret 处理：CI 运行时把它们渲染进 `wrangler.jsonc`，输出日志中的取值会被 GitHub 掩码成 `***`。运行时登录密码与 AI 令牌只在提供了对应 Secret 时才重新同步，未提供时保留云端现有值。
+需要更新 CI 凭证时，`node tools/setup-ci-secrets.mjs` 可将 `.dev.vars` 中对应值提交到 GitHub Secrets，不输出凭证；目标仓库默认 `teamilkman/case-notes`，可用 `CI_REPO` 覆盖。Cloudflare 账户管理凭证与日志应用令牌用途不同。部署地址与标识同样按 Secret 处理：CI 运行时把它们渲染进 `wrangler.jsonc`，输出日志中的取值会被 GitHub 掩码成 `***`。运行时登录密码只在提供了 `WEB_PASSWORD` 时才重新同步，未提供时保留云端现有值。
 
-线上核验覆盖 OAuth 发现挑战与元数据、MCP 初始化说明与 OpenAPI 描述的同源一致性、工具发现与调用、登录/退出、未认证拒绝、网页数据库列表及出现续页时的游标读取；搜索限定事务，以小页长分别核验 REST 和 MCP 的只读分页，不向正式日志写测试记录。OAuth 授权、兑换、续期与撤销在隔离 Miniflare/D1 测试中核验。识别到每日 D1 额度错误后停止即时重试，接口返回明确错误和 UTC 重置时刻。以对应提交的 CI 结果判断是否已部署，不把本地构建成功当作上线成功。
+线上核验先用网页密码换取一个 OAuth 令牌，再覆盖 OAuth 发现挑战与元数据、MCP 初始化说明与 OpenAPI 描述的同源一致性、工具发现与调用、登录/退出、未认证拒绝、网页数据库列表及出现续页时的游标读取；搜索限定事务，以小页长分别核验 REST 和 MCP 的只读分页，不向正式日志写测试记录。OAuth 授权、兑换、续期与撤销在隔离 Miniflare/D1 测试中核验。识别到每日 D1 额度错误后停止即时重试，接口返回明确错误和 UTC 重置时刻。以对应提交的 CI 结果判断是否已部署，不把本地构建成功当作上线成功。
 
 ## 数据保护与备份
 

@@ -40,17 +40,42 @@ const call=async(name:string,args:any,p=ai)=>{
   return result;
 };
 async function create(name='测试案'){const r:any=await call('cases_create',{name,request_key:key()});return r.data.case_id;}
+// Programmatic access is OAuth only: the tests mint a token from the web password.
+async function oauthAccessToken(){
+  const verifier='v'.repeat(43),redirect='https://client.example/callback';
+  const challenge=Buffer.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier)))).toString('base64url');
+  const registered=await mf.dispatchFetch('http://localhost/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({client_name:'service-test',redirect_uris:[redirect]})});
+  const client=await registered.json() as any;
+  assert.equal(registered.status,201,JSON.stringify(client));
+  const query=new URLSearchParams({client_id:client.client_id,redirect_uri:redirect,response_type:'code',scope:'mcp',
+    resource:'http://localhost/mcp',code_challenge:challenge,code_challenge_method:'S256'});
+  const consent=await mf.dispatchFetch('http://localhost/oauth/authorize?'+query.toString(),{redirect:'manual'});
+  const page=await consent.text();
+  const nonce=page.match(/name="request" value="([A-Za-z0-9_-]+)"/)?.[1],browser=consent.headers.get('set-cookie')?.split(';')[0];
+  assert.ok(nonce&&browser,'consent page must expose the pending request');
+  const approval=await mf.dispatchFetch('http://localhost/oauth/authorize',{method:'POST',redirect:'manual',
+    headers:{'Content-Type':'application/x-www-form-urlencoded',Origin:'http://localhost',Cookie:browser!},
+    body:new URLSearchParams({request:nonce!,decision:'allow',password:'test-password'}).toString()});
+  const code=new URL(approval.headers.get('location')!).searchParams.get('code');
+  assert.ok(code,'authorization must issue a code');
+  const exchanged=await mf.dispatchFetch('http://localhost/oauth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams({grant_type:'authorization_code',code:code!,redirect_uri:redirect,client_id:client.client_id,code_verifier:verifier,resource:'http://localhost/mcp',scope:'mcp'}).toString()});
+  const tokens=await exchanged.json() as any;
+  assert.ok(tokens.access_token,'token exchange must return an access token');
+  return tokens.access_token as string;
+}
 async function lines(cid:string){const r:any=await call('cases_get',{case_ref:cid});return r.data;}
 before(async()=>{
   mf=new Miniflare(convertV4MiniflareOptions({name:'case-notes-test',modules:true,scriptPath:resolve('dist/worker.js'),compatibilityDate:'2026-10-01',compatibilityFlags:['nodejs_compat'],
     telemetry:{enabled:false},resourcePersistencePath:temp,d1Databases:{DB:'test-business'},
-    bindings:{WEB_PASSWORD:'test-password',API_TOKEN:'test-api-token',WORKSPACE_ID:'personal',API_CLIENT_ID:'test-client'},
+    bindings:{WEB_PASSWORD:'test-password',WORKSPACE_ID:'personal'},
     assets:{directory:resolve('public'),binding:'ASSETS',run_worker_first:['/api/*','/mcp','/health','/oauth/*','/.well-known/*'],routerConfig:{has_user_worker:true}}}));
   const db=await mf.getD1Database('DB');
   for(const [database,folder] of [[db,'migrations/business']] as const)
     for(const file of readdirSync(folder).filter(f=>f.endsWith('.sql')).sort())
       await database.batch(migrationSql(resolve(folder,file)).map(s=>database.prepare(s)));
-  env={DB:db as unknown as D1Database,ASSETS:null as any,WEB_PASSWORD:'test-password',API_TOKEN:'test-api-token'};
+  env={DB:db as unknown as D1Database,ASSETS:null as any,WEB_PASSWORD:'test-password'};
 });
 after(async()=>{await mf?.dispose();assert.equal(dirname(realpathSync(temp)),realpathSync(tmpdir()));assert.ok(basename(temp).startsWith('case-notes-test-'));rmSync(temp,{recursive:true});});
 
@@ -295,12 +320,12 @@ test('live verification exercises REST and MCP on both hosts without snapshot wr
   for(const name of ['续页核验事务一','续页核验事务二'])await call('cases_create',{name,kind:'affair',request_key:key()});
   const source=readFileSync('tools/check-deployment.mjs','utf8'),searches:any[]=[],waits:number[]=[];
   const config={CLOUDFLARE_ACCOUNT_ID:'synthetic-account',CLOUDFLARE_API_TOKEN:'synthetic-deployment-token',
-    API_TOKEN:'test-api-token',WEB_PASSWORD:'test-password',DEPLOYMENT_URL:'https://synthetic-domain.test'};
+    WEB_PASSWORD:'test-password',DEPLOYMENT_URL:'https://synthetic-domain.test'};
   const before=(await env.DB.prepare('SELECT COUNT(*) AS n FROM read_snapshots').first<any>()).n;
   let quota=false,attempts=0;
   const fakeFetch=async(url:string,options:any={})=>{
     if(new URL(url).host==='api.cloudflare.com')return Response.json({success:true,result:{subdomain:'synthetic-worker'}});
-    const body=options.body?JSON.parse(options.body):null;
+    const body=options.body&&String(options.headers?.['Content-Type']??'').startsWith('application/json')?JSON.parse(String(options.body)):null;
     const authenticated=new URL(url).pathname==='/api/v1/search'&&options.headers?.Authorization;
     if(authenticated){attempts++;if(quota)return Response.json(failure(new Error("Your account has exceeded D1's free tier daily row read limit.")),{status:503});}
     const result=await mf.dispatchFetch(url,options);
@@ -310,7 +335,7 @@ test('live verification exercises REST and MCP on both hosts without snapshot wr
     }
     return result;
   };
-  const run=()=>runInNewContext(`(async()=>{${source}\n})()`,{fetch:fakeFetch,URL,process:{env:config},console:{log(){}},
+  const run=()=>runInNewContext(`(async()=>{${source}\n})()`,{fetch:fakeFetch,URL,URLSearchParams,crypto,Buffer,TextEncoder,process:{env:config},console:{log(){}},
     setTimeout:(fn:()=>void,ms:number)=>{waits.push(ms);fn();}});
   await run();assert.equal(searches.length,8);assert.ok(searches.every(s=>s.snapshot_id===null));
   assert.equal(searches.filter(s=>s.page_start===1).length,4);
@@ -438,7 +463,7 @@ test('long literal search terms work across AI and web metadata, aliases, notes 
   const next:any=await call('search',{query,limit:1,cursor:first.data.next_cursor});assert.equal(next.data.items[0].line.text,long+' 第一条');
   const browser:any=await webRead(env,web,'cases',{query:query.slice(-100)});assert.equal(browser.data.items[0].id,cid);assert.equal(browser.data.items[0].match_text,long+' 第一条');
   const alias:any=await call('search',{query:long.slice(0,150),result_type:'cases'});assert.equal(alias.data.items[0].case.id,cid);
-  const response=await mf.dispatchFetch('http://localhost/api/v1/search',{method:'POST',headers:{Authorization:'Bearer test-api-token','Content-Type':'application/json'},body:JSON.stringify({query})});
+  const response=await mf.dispatchFetch('http://localhost/api/v1/search',{method:'POST',headers:{Authorization:'Bearer '+await oauthAccessToken(),'Content-Type':'application/json'},body:JSON.stringify({query})});
   assert.equal(response.status,200);assert.equal((await response.json() as any).ok,true);
 });
 
@@ -605,8 +630,8 @@ test('web login uses HttpOnly sessions, cross-origin writes rejected and logout 
   const another=await mf.dispatchFetch('http://localhost/api/login',{method:'POST',headers:{Origin:'http://localhost','Content-Type':'application/json'},body:JSON.stringify({password:'test-password'})});
   const anotherCookie=another.headers.get('set-cookie')!.split(';')[0];assert.notEqual((await readSession(anotherCookie)).cache_scope,session.cache_scope);
   assert.equal((await readSession(anotherCookie)).change_token,session.change_token);
-  const aiSession=await (await mf.dispatchFetch('http://localhost/api/session',{headers:{Authorization:'Bearer test-api-token'}})).json() as any;
-  assert.equal(aiSession.data.source,'ai');assert.equal(aiSession.data.cache_scope,undefined);assert.equal(aiSession.data.change_token,undefined);
+  const legacy=await mf.dispatchFetch('http://localhost/api/session',{headers:{Authorization:'Bearer test-api-token'}});
+  assert.equal(legacy.status,401); // the fixed AI token is gone; only OAuth authorises AI access
   assert.equal((await readSession(cookie)).change_token,session.change_token);
   await mf.dispatchFetch('http://localhost/api/logout',{method:'POST',headers:{Cookie:anotherCookie,Origin:'http://localhost'},body:'{}'});
   assert.equal((await mf.dispatchFetch('http://localhost/api/logout',{method:'POST',headers:{Cookie:cookie,Origin:'http://localhost'},body:'{}'})).status,200);
@@ -627,8 +652,9 @@ test('the session change token moves only on committed business writes',async()=
   assert.notEqual(await token(),added);                                 // metadata moves its own version
 });
 test('real MCP discovery exposes nine tools including unified search, and tool failures are isError results',async()=>{
+  const access=await oauthAccessToken();
   const mcp=async(method:string,params:any={})=>{
-    const response=await mf.dispatchFetch('http://localhost/mcp',{method:'POST',headers:{Authorization:'Bearer test-api-token','Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'},body:JSON.stringify({jsonrpc:'2.0',id:crypto.randomUUID(),method,params})});
+    const response=await mf.dispatchFetch('http://localhost/mcp',{method:'POST',headers:{Authorization:'Bearer '+access,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'},body:JSON.stringify({jsonrpc:'2.0',id:crypto.randomUUID(),method,params})});
     assert.equal(response.status,200,await response.clone().text());
     const result=await response.json() as any;
     if(method==='tools/call'){
