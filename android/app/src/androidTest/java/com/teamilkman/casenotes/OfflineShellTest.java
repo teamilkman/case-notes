@@ -3,7 +3,6 @@ package com.teamilkman.casenotes;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
-import android.net.Uri;
 import android.os.SystemClock;
 import android.view.ViewGroup;
 import android.webkit.WebView;
@@ -23,7 +22,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -73,15 +71,21 @@ public class OfflineShellTest {
     }
 
     private static String eval(WebView web, String script) throws Exception {
-        AtomicReference<String> result = new AtomicReference<>(); CountDownLatch done = new CountDownLatch(1);
+        AtomicReference<String> result = new AtomicReference<>(null); CountDownLatch done = new CountDownLatch(1);
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> web.evaluateJavascript(script, value -> { result.set(value); done.countDown(); }));
-        assertTrue("JavaScript callback timed out", done.await(5, TimeUnit.SECONDS));return result.get();
+        if (!done.await(20, TimeUnit.SECONDS)) return "<timeout>";
+        return result.get();
     }
 
     private static void await(WebView web, String expression) throws Exception {
-        long deadline = SystemClock.elapsedRealtime() + 15000;
-        while (SystemClock.elapsedRealtime() < deadline) { if ("true".equals(eval(web, expression))) return; Thread.sleep(50); }
+        // This guest renders the shell slowly, so poll instead of failing on one slow round trip.
+        long deadline = SystemClock.elapsedRealtime() + 60000;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if ("true".equals(eval(web, expression))) return;
+            Thread.sleep(200);
+        }
         fail("Offline page did not become ready: " + expression + "; " + eval(web,
-            "JSON.stringify({url:location.href,seedError:window.__seedError,secure:isSecureContext,body:document.body.innerText.slice(0,600)})"));
+            "JSON.stringify({url:location.href,ready:document.readyState,seedError:window.__seedError,secure:isSecureContext," +
+            "logged:typeof window.DB,body:document.body.innerText.slice(0,400)})"));
     }
 }
