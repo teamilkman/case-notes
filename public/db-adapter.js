@@ -66,7 +66,7 @@ export function legacyView(cases,rows){
   return D;
 }
 const wrap=value=>typeof window!=='undefined'&&window.Vue?window.Vue.reactive(value):value;
-const connection=wrap({offline:typeof navigator!=='undefined'&&navigator.onLine===false,authRequired:false,reconnecting:false,error:''});
+const connection=wrap({offline:typeof navigator!=='undefined'&&navigator.onLine===false,authRequired:false,reconnecting:false,error:'',syncing:typeof window!=='undefined'});
 const persistent=typeof window!=='undefined'?createPersistentCache({isOffline:()=>connection.offline}):null;
 const reads=createReadCache(wrap,128,persistent),feeds=new Map();let readEpoch=0,privateClosed=false;
 const sessionAccess=persistent?createSessionAccess({persistence:persistent,state:connection,
@@ -101,13 +101,14 @@ void (async()=>{
   try{
     const before=(await persistent.read('__cold_probe__'))?.token;
     await ensureSession();
+    connection.syncing=false;
     const after=(await persistent.read('__cold_probe__'))?.token;
     const changed=!before||!after||before.scope!==after.scope||before.epoch!==after.epoch||(before.change??null)!==(after.change??null);
     if(before&&after&&changed){
       invalidateReads(undefined,false);
       window.dispatchEvent(new Event('case-notes:reconnected'));
     }
-  }catch{}
+  }catch{connection.syncing=false;}
 })();
 if(typeof window!=='undefined'){
   window.addEventListener('offline',()=>{connection.offline=true;});
