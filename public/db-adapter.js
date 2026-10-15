@@ -84,6 +84,15 @@ async function reconnect(){
   try{await sessionAccess?.ensure(true);}catch(error){connection.error=error.message;}
   finally{connection.reconnecting=false;}
 }
+// Foreground resume revalidates once per focus with a short guard so rapid app
+// switches do not queue requests; verification shares the session, only an
+// actual workspace change refreshes the current views.
+let resumeAt=0;
+function resume(){
+  if(privateClosed||connection.reconnecting)return;
+  const now=Date.now();if(now-resumeAt<5000)return;resumeAt=now;
+  void reconnect();
+}
 async function ensureOnline(){
   if(!persistent)return;
   if(connection.offline){const e=new Error('离线时只可查看本地缓存，请联网后再保存或完成待办。');e.code='OFFLINE_READ_ONLY';throw e;}
@@ -113,6 +122,7 @@ void (async()=>{
 if(typeof window!=='undefined'){
   window.addEventListener('offline',()=>{connection.offline=true;});
   window.addEventListener('online',reconnect);
+  window.addEventListener('focus',resume);
 }
 const cacheKey=(name,args)=>name+':'+JSON.stringify(Object.fromEntries(Object.entries(args).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b))));
 // Cache first, offline judgement after: the persistent stale replica is displayed
@@ -274,4 +284,4 @@ function sanitize(html){
   }
   return doc.body.innerHTML;
 }
-if(typeof window!=='undefined')window.DB={connection,reconnect,web,pager,peek:peekPage,feed,calendar,readCalendar,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,save,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};
+if(typeof window!=='undefined')window.DB={connection,reconnect,resume,web,pager,peek:peekPage,feed,calendar,readCalendar,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,save,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};

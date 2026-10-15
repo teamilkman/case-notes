@@ -69,6 +69,16 @@ public class MainActivity extends Activity {
         }
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Returning to the foreground revalidates the session through the same
+        // page entry used by reconnect: silent when unchanged, refresh on change.
+        if (web != null && !isFinishing() && !isDestroyed()) {
+            web.evaluateJavascript("window.DB&&window.DB.resume&&window.DB.resume()", null);
+        }
+    }
+
     /** Compares the installed package with the published rolling release in the background. */
     private void checkForUpdate() { checkForUpdate(false); }
 
