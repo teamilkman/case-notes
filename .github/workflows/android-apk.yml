@@ -88,7 +88,9 @@ jobs:
             adb shell svc data disable || true
             adb shell cmd connectivity airplane-mode enable || true
             adb logcat -c
-            gradle :app:connectedDebugAndroidTest --project-dir android; code=$?
+            # A wedged guest (adb half-dead, gradle hung) must fail fast into the
+            # retry step instead of burning the 30-minute job limit.
+            timeout -k 30 480 gradle :app:connectedDebugAndroidTest --project-dir android; code=$?
             # The action's own capture window is too narrow; keep the whole system log.
             adb logcat -d > android/app/build/outputs/androidTest-results/connected/full-logcat.txt || true
             exit $code
