@@ -48,6 +48,7 @@ jobs:
           fi
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
       - name: Build signed APKs
+        id: version
         env:
           KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
@@ -58,6 +59,8 @@ jobs:
           cp android/app/build/outputs/apk/debug/app-debug.apk case-notes-debug.apk
           cp android/app/build/outputs/apk/release/app-release.apk case-notes-release.apk
           ls -lh case-notes-debug.apk case-notes-release.apk
+          code=$(gradle -q :app:printVersionCode --project-dir android 2>/dev/null | tail -n 1)
+          echo "code=$code" >> "$GITHUB_OUTPUT"
       - name: Verify release signature
         run: |
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs case-notes-release.apk
@@ -73,7 +76,7 @@ jobs:
           tag_name: android-latest
           name: Android APK (latest)
           body: |
-            main 分支滚动构建，提交 `${{ github.sha }}`。
+            main 分支滚动构建，提交 `${{ github.sha }}`，版本号 ${{ steps.version.outputs.code }}。
             下载 `case-notes-release.apk` 使用新包名安装；后续版本可覆盖升级（固定签名）；`case-notes-debug.apk` 为调试包。
           make_latest: false
           files: |

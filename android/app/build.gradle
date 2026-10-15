@@ -60,6 +60,12 @@ tasks.register('prepareShell', Exec) {
 }
 tasks.named('preBuild').configure { dependsOn 'prepareShell' }
 
+// CI's release workflow embeds this into the published release so installed apps
+// can compare their own versionCode against the latest one.
+tasks.register('printVersionCode') {
+    doLast { println android.defaultConfig.versionCode }
+}
+
 dependencies {
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test:core:1.6.1'

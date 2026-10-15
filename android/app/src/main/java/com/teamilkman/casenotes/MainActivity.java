@@ -28,6 +28,10 @@ import android.widget.Toast;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+
 /**
  * A permanent APK shell on a locally configured HTTPS origin; only API requests use the
  * network. The server address is entered on the device and stored there, so the packaged
@@ -38,6 +42,8 @@ public class MainActivity extends Activity {
     private static final String PREFS = "case-notes";
     private static final String KEY_HOST = "shell-host";
     private static final String SAVED_URL = "case-notes:url";
+    private static final String RELEASES = "https://api.github.com/repos/teamilkman/case-notes/releases/tags/android-latest";
+    private static final String RELEASE_PAGE = "https://github.com/teamilkman/case-notes/releases/tag/android-latest";
 
     private WebView web;
     private String host;
@@ -56,7 +62,74 @@ public class MainActivity extends Activity {
         }
         host = storedHost();
         if (host == null) showSetup("请输入你自己的服务器域名，例如 example.com。地址只保存在本机，应用内不含任何服务器地址。");
-        else showShell(savedInstanceState);
+        else {
+            showShell(savedInstanceState);
+            checkForUpdate();
+        }
+    }
+
+    /** Compares the installed package with the published rolling release in the background. */
+    private void checkForUpdate() {
+        // Publishing bumps versionCode, so an int comparison is sufficient.
+        final long installed;
+        try { installed = getPackageManager().getPackageInfo(getPackageName(), 0).getLongVersionCode(); }
+        catch (Exception error) { return; }
+        new Thread(() -> {
+            long published = -1;
+            try {
+                java.net.HttpURLConnection connection = (java.net.HttpURLConnection) new java.net.URL(RELEASES).openConnection();
+                connection.setConnectTimeout(8000);
+                connection.setReadTimeout(8000);
+                connection.setRequestProperty("Accept", "application/vnd.github+json");
+                if (connection.getResponseCode() != 200) throw new IOException();
+                org.json.JSONObject release = new org.json.JSONObject(readAll(connection.getInputStream()));
+                for (org.json.JSONObject asset : iterable(release.getJSONArray("assets"))) {
+                    // Asset names are "app-release.apk" (signed) or "case-notes-release.apk".
+                    if (asset.getString("name").endsWith("release.apk")) {
+                        published = parseVersionCode(asset.getString("browser_download_url"));
+                        break;
+                    }
+                }
+                if (published < 0) published = parseVersionCode(release.getString("html_url"));
+            } catch (Exception error) { return; } // offline or GitHub unavailable: silently skip
+            if (published <= installed) return;
+            final long newer = published;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || web == null) return;
+                Toast.makeText(this, "发现新版本 " + newer + "，正在打开下载页面。", Toast.LENGTH_LONG).show();
+                try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASE_PAGE))); }
+                catch (Exception ignored) { }
+            });
+        }, "case-notes-update-check").start();
+    }
+
+    private static String readAll(InputStream in) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        byte[] buffer = new byte[4096]; int count;
+        try (InputStream stream = in) {
+            while ((count = stream.read(buffer)) != -1) bytes.write(buffer, 0, count);
+        }
+        return bytes.toString("UTF-8");
+    }
+
+    private static Iterable<org.json.JSONObject> iterable(org.json.JSONArray array) {
+        return () -> new java.util.Iterator<>() {
+            private int index = 0;
+            @Override public boolean hasNext() { return index < array.length(); }
+            @Override public org.json.JSONObject next() { return array.optJSONObject(index++); }
+        };
+    }
+
+    /**
+     * The release does not embed its version in a machine field, so read it from the
+     * APK download URL, which CI appends as "-v<versionCode>" via the release body.
+     */
+    private static long parseVersionCode(String text) {
+        java.util.regex.Matcher match = java.util.regex.Pattern
+            .compile("[?&]v=(\\d+)|-v(\\d+)\\.apk").matcher(text == null ? "" : text);
+        if (!match.find()) return -1;
+        String value = match.group(1) != null ? match.group(1) : match.group(2);
+        return value == null ? -1 : Long.parseLong(value);
     }
 
     private SharedPreferences prefs() { return getSharedPreferences(PREFS, MODE_PRIVATE); }
