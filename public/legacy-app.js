@@ -50,6 +50,7 @@ const makeSnippet = (c, q) => {  // 案件 c 在搜索词 q 下的首个匹配�
 const state = reactive({
   D: DB.legacyView([],[]), connection:DB.connection, counts:{}, statsError:'', statsLoading:false, statsAt:0, change:0, error:'', loggingOut:false, view:'kanban', selCase:null, toast:null,
   scrolls:{},casesSearch:'',caseParent:null,pageOrder:['kanban','cases','calendar'],viewsReady:false,mobile:window.matchMedia?.(MOBILE_QUERY).matches||false,
+  inApk:typeof location!=='undefined'&&typeof location.pathname==='string'&&location.pathname.indexOf('/__app__/')===0,
   cal: (() => { const t=new Date(); return { y:t.getFullYear(), m:t.getMonth(), sel: todayStr() }; })(),
 });
 let _toastTimer = null;
@@ -158,6 +159,9 @@ const app = createApp({
   methods:{
     loadStats,
     reconnect:()=>{if(DB.connection.authRequired){location.assign(appLocation('login.html')+location.hash);return;}return DB.reconnect();},
+    // APK manual update entry (no JS bridge): a same-host sentinel navigation is
+    // consumed by the shell, which runs the check and reports back natively.
+    checkUpdate:()=>{location.assign('https://'+location.host+'/__app__/check-update');},
     navigate:view=>navigation.openView(view),
     swiped:view=>navigation.swiped(view),
     pageSettled:()=>navigation.settled(),
@@ -203,7 +207,7 @@ app.component('ui-icon', {
     board:'M3 3h18v18H3z M9 3v18 M15 3v18',folder:'M3 7V5h6l2 2h10v13H3z',calendar:'M4 5h16v16H4z M8 3v4 M16 3v4 M4 10h16',
     search:'M15.5 15.5L21 21 M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0',check:'M5 12l4 4L19 6',clock:'M12 7v5l3 2 M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',
     logout:'M10 4H4v16h6 M14 8l4 4-4 4 M8 12h10',chevron:'M9 5l7 7-7 7',back:'M15 5l-7 7 7 7',edit:'M14 5l5 5 M4 20l5-1L20 8l-4-4L5 15z',
-    file:'M14 3H5v18h14V8z M14 3v5h5 M8 12h8 M8 16h6',lock:'M6 10h12v11H6z M8 10V7a4 4 0 0 1 8 0v3',close:'M6 6l12 12 M18 6L6 18',alert:'M12 8v5 M12 17h.01 M12 3L2 21h20z'
+    file:'M14 3H5v18h14V8z M14 3v5h5 M8 12h8 M8 16h6',lock:'M6 10h12v11H6z M8 10V7a4 4 0 0 1 8 0v3',close:'M6 6l12 12 M18 6L6 18',alert:'M12 8v5 M12 17h.01 M12 3L2 21h20z',download:'M12 3v12 M6 11l6 6 6-6 M4 21h16'
   }[this.name]||'';}},
   template:'<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path :d="path"></path></svg>',
 });

@@ -27,7 +27,7 @@
       <div class="header-stats" role="group" aria-label="工作概览" :aria-busy="$state.statsLoading">
         <span class="header-stat" v-for="metric in [{key:'active',label:'在办案件'},{key:'todos',label:'待办事项'},{key:'future',label:'未来开庭'},{key:'month',label:'本月开庭'}]" :key="metric.key"><b :class="{skeleton:$state.statsLoading&&$state.counts[metric.key]===undefined}">{{ $state.counts[metric.key]??'—' }}</b><span>{{ metric.label }}</span></span>
       </div>
-      <div class="h-right"><span class="header-date">{{ todayStr() }}<span>{{ wk(todayStr()) }}</span></span><button class="sync-btn" :disabled="$state.loggingOut" @click="logout"><ui-icon name="logout"></ui-icon>{{ $state.loggingOut?'退出中…':'退出' }}</button></div>
+      <div class="h-right"><span class="header-date">{{ todayStr() }}<span>{{ wk(todayStr()) }}</span></span><button v-if="$state.inApk" class="sync-btn" @click="checkUpdate"><ui-icon name="download"></ui-icon>检查更新</button><button class="sync-btn" :disabled="$state.loggingOut" @click="logout"><ui-icon name="logout"></ui-icon>{{ $state.loggingOut?'退出中…':'退出' }}</button></div>
     </header>
     <nav class="tabbar" aria-label="主导航" :style="{'--active-tab':['kanban','cases','calendar'].indexOf($state.view)}">
       <button :class="{on:$state.view==='kanban'}" :aria-current="$state.view==='kanban'?'page':null" @click="navigate('kanban')"><ui-icon name="board"></ui-icon>看板</button>

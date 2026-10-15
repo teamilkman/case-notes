@@ -1,6 +1,7 @@
 package com.teamilkman.casenotes;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
@@ -69,7 +70,14 @@ public class MainActivity extends Activity {
     }
 
     /** Compares the installed package with the published rolling release in the background. */
-    private void checkForUpdate() {
+    private void checkForUpdate() { checkForUpdate(false); }
+
+    /**
+     * Silent unless an update is available (automatic startup check) or explicitly
+     * requested (manual entry): a dialog confirms before opening any link, and a
+     * manual check reports current/failure states instead of staying silent.
+     */
+    private void checkForUpdate(final boolean manual) {
         // Publishing bumps versionCode, so an int comparison is sufficient.
         final long installed;
         try { installed = getPackageManager().getPackageInfo(getPackageName(), 0).getLongVersionCode(); }
@@ -85,14 +93,28 @@ public class MainActivity extends Activity {
                 // The release body carries "版本号 <n>"; download URLs cannot carry query
                 // parameters on GitHub, so the body is the only machine-readable source.
                 published = parseVersionCode(new org.json.JSONObject(readAll(connection.getInputStream())).getString("body"));
-            } catch (Exception error) { return; } // offline or GitHub unavailable: silently skip
-            if (published <= installed) return;
+            } catch (Exception error) {
+                // Offline or GitHub unavailable: the automatic check skips silently
+                // while a manual check says so instead of appearing to do nothing.
+                if (manual) runOnUiThread(() -> Toast.makeText(this, "检查失败，请联网后重试。", Toast.LENGTH_SHORT).show());
+                return;
+            }
+            if (published <= installed) {
+                if (manual) runOnUiThread(() -> Toast.makeText(this, "已是最新版本。", Toast.LENGTH_SHORT).show());
+                return;
+            }
             final long newer = published;
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed() || web == null) return;
-                Toast.makeText(this, "发现新版本 " + newer + "，正在打开下载页面。", Toast.LENGTH_LONG).show();
-                try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASE_PAGE))); }
-                catch (Exception ignored) { }
+                new AlertDialog.Builder(this)
+                    .setTitle("发现新版本 " + newer)
+                    .setMessage("已有可下载的新版本，是否前往下载页面？")
+                    .setPositiveButton("前往下载", (dialog, which) -> {
+                        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASE_PAGE))); }
+                        catch (Exception ignored) { }
+                    })
+                    .setNegativeButton("稍后", null)
+                    .show();
             });
         }, "case-notes-update-check").start();
     }
@@ -322,7 +344,15 @@ public class MainActivity extends Activity {
         if (uri == null) return true;
         String scheme = uri.getScheme();
         if (!"http".equals(scheme) && !"https".equals(scheme)) return true;
-        if (host != null && host.equals(uri.getHost())) return false;
+        if (host != null && host.equals(uri.getHost())) {
+            // Manual update entry from the page (no JS bridge): a same-host
+            // sentinel navigation is consumed here instead of loading.
+            if ((BundledShell.PREFIX + "check-update").equals(uri.getPath())) {
+                checkForUpdate(true);
+                return true;
+            }
+            return false;
+        }
         try {
             startActivity(new Intent(Intent.ACTION_VIEW, uri));
         } catch (Exception ignored) {
