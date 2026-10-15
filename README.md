@@ -97,7 +97,7 @@ npm test
 
 ## CI 发布与凭证
 
-发布统一走 [GitHub Actions](https://github.com/teamilkman/case-notes/actions)。main 推送或在 main 分支手动触发后执行检查、云端结构迁移、运行时 Secret 配置、域名绑定、Worker 部署与线上核验；PR 和其他分支的手动运行只检查。旧系统导入和 parser v2 一次性升级已退役，发布不再执行导入或索引升级脚本。结构迁移历史保留，已应用的迁移不会重复执行。资源改名迁移通过 `tools/rename-resources.ts` 执行：确认源 Worker 与域名、数据库身份，冻结源库写入，将全部业务和鉴权表逐字段、数量及外键核验后与完成标记原子提交；已完成的迁移不再读取或导入源库。CI 先部署新 Worker 并配置凭证，再转移主域名，线上核验通过后删除源 Worker 和源数据库。失败保留源数据，可重试 CI。
+发布统一走 [GitHub Actions](https://github.com/teamilkman/case-notes/actions)。main 推送或在 main 分支手动触发后执行检查、渲染部署配置、云端结构迁移、可选运行时 Secret 同步、Worker 部署、域名绑定与线上核验；PR 和其他分支的手动运行只检查。旧系统导入、parser v2 升级与 `ai-log` 资源改名迁移均已完成并退役，发布不再执行导入、索引升级或资源转移脚本；`tools/rename-resources.ts --stage-config` 仍用于生成不含路由的部署配置。结构迁移历史保留，已应用的迁移不会重复执行。失败可重试 CI。
 
 | 用途 | 运行时/本地变量 | GitHub Secret |
 | --- | --- | --- |

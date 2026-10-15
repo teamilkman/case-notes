@@ -65,8 +65,6 @@ jobs:
         run: node tools/check-cloudflare-token.mjs
       - name: Apply schema migrations
         run: npx wrangler d1 migrations apply case-notes --remote
-      - name: Transfer verified project data
-        run: npx tsx tools/rename-resources.ts
       - name: Prepare deployment before domain cutover
         run: npx tsx tools/rename-resources.ts --stage-config
       - name: Configure runtime secrets
@@ -75,11 +73,7 @@ jobs:
           node -e 'process.stdout.write(JSON.stringify({WEB_PASSWORD:process.env.WEB_PASSWORD,API_TOKEN:process.env.API_TOKEN}))' | npx wrangler secret bulk --config .wrangler/staged-worker.json
       - name: Deploy Worker
         run: npm run deploy -- --config .wrangler/staged-worker.json
-      - name: Verify transferred business facts before cutover
-        run: npx tsx tools/rename-resources.ts --verify
       - name: Verify or bind custom domain
         run: node tools/bind-domain.mjs
       - name: Verify live service
         run: node tools/check-deployment.mjs
-      - name: Retire verified source resources
-        run: npx tsx tools/rename-resources.ts --retire
