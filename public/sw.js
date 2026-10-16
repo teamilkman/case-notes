@@ -1,4 +1,4 @@
-const CACHE='case-notes-shell-v25-permanent';
+const CACHE='case-notes-shell-v26-permanent';
 // Cache only this public, versioned shell. Private API responses stay in Dexie.
 const SHELL=['/','/theme.css','/web/logo.svg','/legacy-app.js','/legacy.css','/page-deck.js','/navigation.js','/db-adapter.js','/storage-upgrade.js','/session-access.js','/app-location.js','/paging.js','/read-cache.js','/persistent-cache.js','/editor.js','/register-sw.js','/web/vendor/dexie.mjs','/web/vendor/vue.global.prod.js','/web/vendor/marked.min.js','/web/vendor/swiper.min.js','/web/vendor/swiper.min.css','/login.html','/login.css','/login.js'];
 const OPTIONAL=['/favicon.ico','/manifest.webmanifest','/web/apple-touch-icon.png','/web/icon-192.png','/web/icon-maskable-512.png'];
