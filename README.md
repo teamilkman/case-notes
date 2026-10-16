@@ -1,8 +1,19 @@
-# 案记
+# 案记 (case-notes)
 
-律师的中文私人工作日志。记录、待办和日程共用有序文本行，由 Cloudflare Worker、D1 和 Vue 3 提供网页、REST API、MCP 与操作审计。卷宗文件保留在本机。
+律师的中文私人工作日志。记录、待办和日程共用有序文本行，由 Cloudflare Worker、D1 和 Vue 3 提供网页、REST API、MCP 与操作审计。卷宗文件保留在本机。（仓库名与 npm 包名均为 `case-notes`。）
 
 部署在自己的域名上；部署地址、Cloudflare 账户/区域与数据库标识只存在于运行时 Secret 与本地 `.dev.vars`，不写进仓库，也不打进 APK。
+
+## 目录
+
+- [文档入口](#文档入口)
+- [本地开发与验证](#本地开发与验证)
+- [代码入口](#代码入口)
+- [当前实现](#当前实现)
+- [安卓应用](#安卓应用)
+- [CI 发布与凭证](#ci-发布与凭证)
+- [数据保护与备份](#数据保护与备份)
+- [贡献与许可](#贡献与许可)
 
 ## 文档入口
 
@@ -17,6 +28,49 @@
 
 产品规则、参数和工具行为改变时统一更新 `src/schemas.ts`，MCP 与 OpenAPI 自动使用同一来源。README 和 AGENTS 只维护项目说明与开发约束，不复制使用规则。过程记录、旧方案和单次测试报告不作为长期文档保存，变更历史由 Git 与 CI 留存。
 
+## 本地开发与验证
+
+需要 Node.js 22+。在项目根目录执行：
+
+```powershell
+npm ci
+npm run setup:local
+npm run dev
+```
+
+`setup:local` 应用本地结构迁移，在 `.dev.vars` 不存在时生成随机网页登录密码；不导入日志。已有环境启动只需 `npm run dev`，也可使用 `start.cmd`。`wrangler.jsonc` 由 `tools/render-wrangler.mjs` 从 `wrangler.template.jsonc` 与 `.dev.vars`/环境变量生成，本身不进版本库；`npm run dev`、`npm run build`、`npm run db:migrate` 与部署前都会自动生成一次，本地缺少部署值时使用占位域名。
+
+网页地址为 `http://127.0.0.1:8787`，MCP 为 `http://127.0.0.1:8787/mcp`。用 `.dev.vars` 中的 `WEB_PASSWORD` 登录；MCP 客户端通过 OAuth 登录授权后即可连接。更新已有本地环境时运行 `npm run db:migrate` 应用统一数据库迁移。本地数据库身份保持稳定，目录改名时 `.wrangler/` 一起保留。本地库与云端库独立，修改不会自动同步。
+
+```powershell
+npm run typecheck
+npm test
+```
+
+`npm test` 的前置步骤已执行构建。`npm run build` 是 Wrangler dry-run，不部署。数据库测试使用临时隔离 Miniflare/D1；界面变更另按 AGENTS 中的要求检查浏览器。本地调试安卓壳需要 Node.js 22+，先在项目根目录执行 `npm ci`，再用 Android Studio 打开 `android/`；Gradle 的 `prepareShell` 自动生成公共资源与本地模块，生成资源不进 Git。
+
+## 代码入口
+
+| 位置 | 职责 |
+| --- | --- |
+| `src/worker.ts`、`auth.ts`、`oauth.ts` | HTTP 路由、参数校验、登录会话、AI 鉴权与 MCP OAuth 授权 |
+| `src/schemas.ts`、`mcp.ts` | AI 工具定义、OpenAPI 与 MCP 适配 |
+| `src/service.ts`、`parser.ts`、`ordering.ts`、`receipts.ts` | 事务读写、版本、审计、幂等、行解析、稀疏排序与回执存储 |
+| `src/queries.ts`、`search.ts`、`web-queries.ts` | 版本校验分页、统一搜索与网页实时查询 |
+| `public/index.html`、`legacy-app.js`、`legacy.css`、`theme.css` | Vue 页面、视图逻辑、布局样式与共享设计变量 |
+| `public/page-deck.js`、`navigation.js` | Swiper 页面滑动、延迟展示与明确的返回层级 |
+| `public/login.html`、`login.js`、`login.css` | 登录页面、密码显隐与登录反馈 |
+| `public/404.html`、`404.css` | 自定义未找到页面与返回首页入口；静态资源未命中时返回 HTTP 404 |
+| `public/oauth.js`、`oauth.css` | OAuth 授权页的密码显隐、提交反馈与布局；页面由 Worker 渲染 |
+| `public/db-adapter.js`、`session-access.js`、`editor.js`、`paging.js`、`read-cache.js`、`persistent-cache.js` | 数据适配、网页会话与离线核验、行身份维护、连续分页、响应式内存缓存与会话隔离的 Dexie 持久缓存 |
+| `migrations/business/`、`migrations/auth/` | 统一数据库的结构迁移与旧鉴权库迁移历史 |
+| `tests/` | 隔离数据库、接口和前端逻辑测试 |
+| `tools/` | 环境初始化、部署配置渲染、本地备份、域名配置与线上核验 |
+| `android/` | 安卓 Web 套壳：单 WebView 打开本机填写的服务器域名，包名 `com.teamilkman.casenotes` |
+| `.github/workflows/deploy.yml` | 检查与 CI 发布流程 |
+| `.github/workflows/android-apk.yml` | 安卓质量核验（每周定时/手动/PR）：构建、单元测试与模拟器检查，不阻塞发布 |
+| `.github/workflows/android-release.yml` | 安卓 APK 的签名与 `android-latest` Release 发布 |
+
 ## 当前实现
 
 ### 鉴权与数据
@@ -25,7 +79,7 @@
 
 OAuth 提供资源与授权服务器发现、动态客户端注册、S256 PKCE 授权码、刷新令牌轮换及撤销。客户端连接 `/mcp` 后通过浏览器明确同意授权；访问令牌有效期 1 小时，授权最多保留 30 天，客户端注册有效期 1 年。授权码有效期 5 分钟且只能兑换一次；重复使用刷新令牌会撤销该授权，客户端应串行续期。令牌绑定连接时的域名、MCP 地址、工作空间及客户端，主域名与备用域名分别授权；OAuth 令牌用于 REST 与 MCP，保持 AI 权限与客户端审计身份，不能调用网页专属接口。鉴权表仅保存随机凭证摘要，不保存明文授权码、访问令牌、刷新令牌或客户端密钥；网页登录密码仍由 Secret 配置。公开注册与授权入口限流，过期记录按索引限量清理。
 
-统一数据库 `DB` 用不同表保存日志、网页登录会话与 OAuth 客户端、授权请求及令牌摘要；绑定和静态资源配置见 `wrangler.jsonc`（由 `wrangler.template.jsonc` 生成，见「本地开发」）。
+统一数据库 `DB` 用不同表保存日志、网页登录会话与 OAuth 客户端、授权请求及令牌摘要；绑定和静态资源配置见 `wrangler.jsonc`（由 `wrangler.template.jsonc` 生成，见「本地开发与验证」）。
 
 | 数据 | 职责 |
 | --- | --- |
@@ -59,29 +113,7 @@ AI 查询使用只读排序键游标，不创建或清理持久快照。每页�
 
 首屏结束且当月日历加载成功后，预加载前后各三个月，切换月份后补齐周边范围。笔记保存后重新选中看板会按需更新待办、开庭与已展开的近期完成，勾选状态不阻挡刷新；待办仅保留行 ID 与版本均未改变的勾选。失效列表重读已浏览范围，续页入口同样检查写入代次，避免沿旧游标追加旧数据。提交完成待办时隔离旧续页响应，版本冲突后重新核对列表。近期完成折叠时随统计请求读取近 7 天与近 30 天的数量，展开后才按页读取记录。草稿在当前标签页保存基准版本和行身份，旧草稿不能覆盖服务器更新；主动退出成功时清理私有缓存与草稿，清理持久副本完成后跳转登录页；云端认证不可用时保留副本和草稿，提示登录后同步。网页 Service Worker 在页面加载时立即注册，联网恢复时重试注册；必需应用壳资源完整安装后才激活，可选图标下载失败不阻断离线安装。网页应用壳不设置到期时间，按版本优先读取缓存，仅在完整新版本激活后删除旧壳；首页查询参数不妨碍离线启动，修改壳资源时同步升级 `sw.js` 的缓存版本。私人 API 响应不进入 Service Worker 缓存。手机浏览器需先联网完成应用壳安装；浏览器或用户清理站点存储后需联网重建。安卓 APK 自带应用壳，首次无网启动也显示框架。查看私人数据仍需先联网登录并读取；没有已读取副本或副本被清理时需要联网。完整案件编辑及预览的成本随单案长度增长，网页整段保存受 1 MiB 请求体和 5,000 行限制，批量索引与审计参数按字节分块并在同一事务提交。
 
-## 代码入口
-
-| 位置 | 职责 |
-| --- | --- |
-| `src/worker.ts`、`auth.ts`、`oauth.ts` | HTTP 路由、参数校验、登录会话、AI 鉴权与 MCP OAuth 授权 |
-| `src/schemas.ts`、`mcp.ts` | AI 工具定义、OpenAPI 与 MCP 适配 |
-| `src/service.ts`、`parser.ts`、`ordering.ts`、`receipts.ts` | 事务读写、版本、审计、幂等、行解析、稀疏排序与回执存储 |
-| `src/queries.ts`、`search.ts`、`web-queries.ts` | 版本校验分页、统一搜索与网页实时查询 |
-| `public/index.html`、`legacy-app.js`、`legacy.css`、`theme.css` | Vue 页面、视图逻辑、布局样式与共享设计变量 |
-| `public/page-deck.js`、`navigation.js` | Swiper 页面滑动、延迟展示与明确的返回层级 |
-| `public/login.html`、`login.js`、`login.css` | 登录页面、密码显隐与登录反馈 |
-| `public/404.html`、`404.css` | 自定义未找到页面与返回首页入口；静态资源未命中时返回 HTTP 404 |
-| `public/oauth.js`、`oauth.css` | OAuth 授权页的密码显隐、提交反馈与布局；页面由 Worker 渲染 |
-| `public/db-adapter.js`、`session-access.js`、`editor.js`、`paging.js`、`read-cache.js`、`persistent-cache.js` | 数据适配、网页会话与离线核验、行身份维护、连续分页、响应式内存缓存与会话隔离的 Dexie 持久缓存 |
-| `migrations/business/`、`migrations/auth/` | 统一数据库的结构迁移与旧鉴权库迁移历史 |
-| `tests/` | 隔离数据库、接口和前端逻辑测试 |
-| `tools/` | 环境初始化、部署配置渲染、本地备份、域名配置与线上核验 |
-| `android/` | 安卓 Web 套壳：单 WebView 打开本机填写的服务器域名，包名 `com.teamilkman.casenotes` |
-| `.github/workflows/deploy.yml` | 检查与 CI 发布流程 |
-| `.github/workflows/android-apk.yml` | 安卓质量核验（每周定时/手动/PR）：构建、单元测试与模拟器检查，不阻塞发布 |
-| `.github/workflows/android-release.yml` | 安卓 APK 的签名与 `android-latest` Release 发布 |
-
-## 安卓应用（Web 套壳）
+## 安卓应用
 
 ### 地址与离线壳
 
@@ -92,27 +124,6 @@ AI 查询使用只读排序键游标，不创建或清理持久快照。每页�
 发新包时在 `android/app/build.gradle` 同步递增 `versionCode`。出包走 CI，两条工作流分离：`Android quality check` 每周一（或按需手动、或改动安卓代码的 PR）构建调试包、跑 JVM 单元测试，并在关闭全部网络的模拟器上核验框架冷启动、活动重建与合成 IndexedDB 副本读取（失败会在新模拟器上重试一次），它是质量信号，不阻塞发布；`Release Android APK` 在 main 上签名并发布 `android-latest` Release 的 `case-notes-release.apk`，不含模拟器，PR 不触发；发布正文带上 `versionCode`，供已安装应用后台检查更新。壳的路径、MIME 与放行规则由 `BundledShellTest`（Robolectric）覆盖，`tests/android-shell.test.ts` 覆盖打包资源图与 `/__app__/` 路径；模拟器核验使用合成域名，仓库与 APK 内都不含真实部署地址。
 
 安卓应用 ID 已统一为 `com.teamilkman.casenotes`。从旧应用迁移时需要安装为新应用并重新登录，云端案件和日志继续保留；后续同包名版本可覆盖升级。Release 包用固定密钥签名以保证后续覆盖升级。密钥由 `ANDROID_KEYSTORE_BASE64`、`ANDROID_STORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 四个 GitHub Secret 提供，本地副本存在 `backups/`（已被忽略，不进版本库，勿外泄）。本地无密钥时 `assembleRelease` 产出未签名包，仅 CI 可出可安装的 release 包。
-
-## 本地开发与验证
-
-需要 Node.js 22+。在项目根目录执行：
-
-```powershell
-npm ci
-npm run setup:local
-npm run dev
-```
-
-`setup:local` 应用本地结构迁移，在 `.dev.vars` 不存在时生成随机网页登录密码；不导入日志。已有环境启动只需 `npm run dev`，也可使用 `start.cmd`。`wrangler.jsonc` 由 `tools/render-wrangler.mjs` 从 `wrangler.template.jsonc` 与 `.dev.vars`/环境变量生成，本身不进版本库；`npm run dev`、`npm run build`、`npm run db:migrate` 与部署前都会自动生成一次，本地缺少部署值时使用占位域名。
-
-网页地址为 `http://127.0.0.1:8787`，MCP 为 `http://127.0.0.1:8787/mcp`。用 `.dev.vars` 中的 `WEB_PASSWORD` 登录；MCP 客户端通过 OAuth 登录授权后即可连接。更新已有本地环境时运行 `npm run db:migrate` 应用统一数据库迁移。本地数据库身份保持稳定，目录改名时 `.wrangler/` 一起保留。本地库与云端库独立，修改不会自动同步。
-
-```powershell
-npm run typecheck
-npm test
-```
-
-`npm test` 的前置步骤已执行构建。`npm run build` 是 Wrangler dry-run，不部署。数据库测试使用临时隔离 Miniflare/D1；界面变更另按 AGENTS 中的要求检查浏览器。本地调试安卓壳需要 Node.js 22+，先在项目根目录执行 `npm ci`，再用 Android Studio 打开 `android/`；Gradle 的 `prepareShell` 自动生成公共资源与本地模块，生成资源不进 Git。
 
 ## CI 发布与凭证
 
@@ -135,3 +146,7 @@ npm test
 真实日志、卷宗、凭证、本地数据库、备份和测试截图不提交 Git。日志正文按数据库接口读取；卷宗不上云。业务数据库不再保存旧系统导入原文、旧元数据、导入回执或迁移审计，当前日志的稳定身份、版本和正常操作审计继续保留；旧系统备份由用户在项目外维护。
 
 `npm run backup:local` 将本地统一数据库导出为 `backups/` 下的 SQL；它包含本地日志和鉴权记录，不包含云端数据。当前项目没有自动云端导出备份任务。合并后完整备份含鉴权摘要；D1 Time Travel 会同时回退日志与会话、OAuth 轮换和撤销状态，恢复后须清除会话与 OAuth 授权并重新登录授权。需要迁移或恢复时先明确源库、目标库与覆盖范围，按当前 schema 和解析规则核验，不能用本地备份代表云端现状。
+
+## 贡献与许可
+
+本项目为私人项目，未设置开源许可证，不接受外部贡献。改动直接在 main 分支提交，正式发布统一走 CI（见「CI 发布与凭证」），变更历史由 Git 与 CI 留存。
