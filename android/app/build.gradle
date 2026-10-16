@@ -12,8 +12,8 @@ android {
         targetSdk 34
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         // 套壳版本号：发新包时同步递增 versionCode，versionName 对外展示。
-        versionCode 19
-        versionName '2.2.3'
+        versionCode 20
+        versionName '2.2.4'
     }
 
     signingConfigs {

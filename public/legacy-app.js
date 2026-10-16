@@ -66,7 +66,7 @@ function rememberCase(c){
 }
 let statsJob=null,prefetchEpoch=-1,firstScreenReady=false;
 // 编辑工具栏的触摸手势状态:触摸事件按 touchstart 的目标派发,布局跳动后仍能命中;合成 click 需要去重
-let editorToolbarTouch=null,editorToolbarHandledAt=0;
+let editorToolbarTouch=null,editorToolbarHandledAt=0,editorToolbarPinning=false;
 function prepareViews(){
   if(state.viewsReady||state.loggingOut||!state.D)return;
   const swiper=document.querySelector('.view-pages')?.swiper;
@@ -404,27 +404,35 @@ app.component('cases-view', {
     },
     toolbarTouchStart(event){  // 取消触摸默认动作用来尽量不夺取正文焦点、不收起输入法
       event.preventDefault();
+      editorToolbarPinning=true;  // 手势期间抢回被系统夺走的焦点,避免输入法闪烁
       const t=event.changedTouches&&event.changedTouches[0];
       editorToolbarTouch=t?{x:t.clientX,y:t.clientY,action:this.toolbarTarget(event.target)}:null;
     },
     toolbarTouchEnd(event){
       const start=editorToolbarTouch;editorToolbarTouch=null;
-      if(!start||!start.action)return;
+      if(!start||!start.action){editorToolbarPinning=false;return;}
       const t=event.changedTouches&&event.changedTouches[0];
-      if(t&&Math.hypot(t.clientX-start.x,t.clientY-start.y)>12)return;  // 从按钮起手纵向滚动时不触发
+      if(t&&Math.hypot(t.clientX-start.x,t.clientY-start.y)>12){editorToolbarPinning=false;return;}  // 从按钮起手纵向滚动时不触发
       event.preventDefault();
       editorToolbarHandledAt=Date.now();
       this.toolbarRun(start.action);
+      editorToolbarPinning=false;
     },
-    toolbarTouchCancel(){editorToolbarTouch=null;},
+    toolbarTouchCancel(){editorToolbarTouch=null;editorToolbarPinning=false;},
     toolbarClick(action){  // 桌面鼠标与键盘走 click;刚由触摸处理过的合成 click 不再重复执行
       if(Date.now()-editorToolbarHandledAt<600)return;
       this.toolbarRun(action);
+    },
+    editorBlurPin(){  // 工具栏手势导致的失焦:同一轮里立刻补回焦点,输入法就不会先收再弹
+      if(!editorToolbarPinning)return;
+      const e=this.$refs.editor;
+      if(e&&document.activeElement!==e)e.focus({preventScroll:true});
     },
     insertTodo(){  // 待办 → 行首复选框循环:无 ↔ 空复选框(- [ ]);- [x] 不参与循环
       if(this.saving)return;
       const ta=this.$refs.editor;
       const p = ta ? ta.selectionStart : this.editText.length;
+      const scroll = ta ? ta.scrollTop : 0;   // 重写 value 会把滚动位置归零,先记下编辑时的视口
       const t=this.editText;
       const ls = p===0?0:t.lastIndexOf('\n', p-1)+1;
       const line = t.slice(ls);
@@ -439,8 +447,8 @@ app.component('cases-view', {
         caret = ls + 6;
       }
       this.updateEdit(newText,{start:ls,end:ls+(m?m[0].length:0),inputType:'insertReplacementText'});
-      // 保持焦点与光标可见:重排后把光标送回目标行,让用户看清切换的是哪一行
-      this.$nextTick(()=>{ const e=this.$refs.editor; if(!e)return; if(document.activeElement!==e)e.focus({preventScroll:true}); e.setSelectionRange(caret, caret); });
+      // 保持焦点、光标与视口:重排后把光标送回目标行,再还原编辑时的滚动位置
+      this.$nextTick(()=>{ const e=this.$refs.editor; if(!e)return; if(document.activeElement!==e)e.focus({preventScroll:true}); e.setSelectionRange(caret, caret); e.scrollTop=scroll; });
     },
     insertNextLine(line){  // 在光标所在行的下一行插入一行记录;当前行为空时直接占用该行
       if(this.saving)return;
@@ -454,7 +462,7 @@ app.component('cases-view', {
       const nl = cur==='' ? '' : '\n';      // 当前行非空才补分隔换行
       this.updateEdit(before + nl + line + tail,{start:le,end:le,inputType:'insertText'});
       const caret = before.length + nl.length + line.length;
-      this.$nextTick(()=>{ const e=this.$refs.editor; e.focus(); e.setSelectionRange(caret, caret); });
+      this.$nextTick(()=>{ const e=this.$refs.editor; if(!e)return; e.focus({preventScroll:true}); e.setSelectionRange(caret, caret); });
     },
   },
 });

@@ -313,27 +313,31 @@ test('toolbar taps keep the editor focused and leave the caret on the toggled li
   const ui=uiHarness(),methods=ui.components['cases-view'].methods;
   let prevented=0;methods.keepEditorFocus.call({}, {preventDefault:()=>{prevented++;}});
   assert.equal(prevented,1);  // 工具栏不夺取正文焦点:否则手机端会收起输入法并触发 :has(:focus) 布局跳动
-  const target:any={selectionStart:2,selectionEnd:2,focusCalls:0,range:null,
+  const target:any={selectionStart:2,selectionEnd:2,scrollTop:250,focusCalls:0,range:null,
     focus(){this.focusCalls++;},setSelectionRange(start:number,end:number){this.range=[start,end];}};
   const view:any={...methods,editing:true,saving:false,dbEditor:{edit:null},editText:'甲\n乙',$refs:{editor:target},$nextTick:(fn:()=>void)=>fn()};
   methods.insertTodo.call(view);
   assert.equal(view.editText,'甲\n- [ ] 乙');
   assert.equal(target.focusCalls,1);        // 焦点回到正文,保持光标可见
   assert.deepEqual(target.range,[8,8]);     // 光标落在目标行复选框之后
+  assert.equal(target.scrollTop,250);       // 重写 value 后还原编辑时的视口
   target.selectionStart=8;methods.insertTodo.call(view);
   assert.equal(view.editText,'甲\n乙');
   assert.deepEqual(target.range,[2,2]);     // 取消待办后光标回到该行行首
 });
 
-test('toolbar touch toggles on the first contact and a synthesized click never doubles it',()=>{
+test('toolbar touch toggles on the first contact, pins focus, and never doubles it',()=>{
   const ui=uiHarness(),methods=ui.components['cases-view'].methods;
-  const target:any={selectionStart:2,selectionEnd:2,focusCalls:0,range:null,
+  const target:any={selectionStart:2,selectionEnd:2,scrollTop:250,focusCalls:0,range:null,
     focus(){this.focusCalls++;},setSelectionRange(start:number,end:number){this.range=[start,end];}};
   const view:any={...methods,editing:true,saving:false,dbEditor:{edit:null},editText:'甲\n乙',$refs:{editor:target},$nextTick:(fn:()=>void)=>fn()};
   const event=(x:number,y:number)=>({preventDefault(){},changedTouches:[{clientX:x,clientY:y}],target:{closest:()=>({getAttribute:()=>'todo'})}});
   methods.toolbarTouchStart.call(view,event(10,10));
+  methods.editorBlurPin.call(view);                  // 手势期间失焦立即补回焦点,输入法不先收再弹
+  assert.equal(target.focusCalls,1);
   methods.toolbarTouchEnd.call(view,event(11,11));   // 触摸按 touchstart 目标派发,首次接触即切换
   assert.equal(view.editText,'甲\n- [ ] 乙');
+  assert.equal(target.scrollTop,250);                // 重写 value 后还原编辑时的视口
   methods.toolbarClick.call(view,'todo');            // 紧随的合成 click 不重复执行
   assert.equal(view.editText,'甲\n- [ ] 乙');
   const moved:any={...view,editText:'甲\n- [ ] 乙'};

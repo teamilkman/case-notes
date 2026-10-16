@@ -334,7 +334,7 @@
               <button class="mini-btn" data-toolbar="schedule" :disabled="saving" title="弹窗填写日期时间正文，插入到光标所在行的下一行" @click="toolbarClick('schedule')"><ui-icon name="calendar"></ui-icon>插入日程</button>
               <button class="mini-btn" data-toolbar="todo" :disabled="saving" title="行首复选框循环切换：无 ↔ - [ ]；- [x] 已完成项不参与切换" @click="toolbarClick('todo')"><ui-icon name="check"></ui-icon>切换待办</button>
             </div>
-            <textarea ref="editor" class="md-editor" name="md-editor" aria-label="案件笔记正文" :value="editText" :disabled="saving" @input="noteInput" @compositionend="noteInput" @beforeinput="beforeNoteInput" spellcheck="false"
+            <textarea ref="editor" class="md-editor" name="md-editor" aria-label="案件笔记正文" :value="editText" :disabled="saving" @input="noteInput" @compositionend="noteInput" @beforeinput="beforeNoteInput" @blur="editorBlurPin" spellcheck="false"
                       placeholder="在此编辑 Markdown 笔记（支持 - 列表、📅 日程、[ ] 待办、## 标题、--- 分隔块等，保存到数据库）"></textarea>
           </div>
           <div v-if="item==='preview'" class="md-preview"><span class="editor-pane-label">阅读预览</span><div class="md-body" v-html="editRendered"></div><p class="preview-empty" v-if="!editText">笔记预览将在这里显示</p></div>
