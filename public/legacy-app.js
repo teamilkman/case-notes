@@ -388,6 +388,9 @@ app.component('cases-view', {
       this.insertNextLine(line);
       this.dlg=false;
     },
+    keepEditorFocus(event){  // 工具栏是编辑区的一部分:夺取焦点会收起输入法,并触发 :has(:focus) 布局跳动,令首次点击落空且看不到光标
+      event.preventDefault();
+    },
     insertTodo(){  // 待办 → 行首复选框循环:无 ↔ 空复选框(- [ ]);- [x] 不参与循环
       if(this.saving)return;
       const ta=this.$refs.editor;
@@ -406,7 +409,8 @@ app.component('cases-view', {
         caret = ls + 6;
       }
       this.updateEdit(newText,{start:ls,end:ls+(m?m[0].length:0),inputType:'insertReplacementText'});
-      this.$nextTick(()=>{ const e=this.$refs.editor; e.focus(); e.setSelectionRange(caret, caret); });
+      // 保持焦点与光标可见:重排后把光标送回目标行,让用户看清切换的是哪一行
+      this.$nextTick(()=>{ const e=this.$refs.editor; if(!e)return; if(document.activeElement!==e)e.focus({preventScroll:true}); e.setSelectionRange(caret, caret); });
     },
     insertNextLine(line){  // 在光标所在行的下一行插入一行记录;当前行为空时直接占用该行
       if(this.saving)return;

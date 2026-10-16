@@ -309,6 +309,22 @@ test('textarea inputs synchronously track IME replacements, no-op compositionend
   }finally{globalThis.sessionStorage=oldStorage;}
 });
 
+test('toolbar taps keep the editor focused and leave the caret on the toggled line',()=>{
+  const ui=uiHarness(),methods=ui.components['cases-view'].methods;
+  let prevented=0;methods.keepEditorFocus.call({}, {preventDefault:()=>{prevented++;}});
+  assert.equal(prevented,1);  // 工具栏不夺取正文焦点:否则手机端会收起输入法并触发 :has(:focus) 布局跳动
+  const target:any={selectionStart:2,selectionEnd:2,focusCalls:0,range:null,
+    focus(){this.focusCalls++;},setSelectionRange(start:number,end:number){this.range=[start,end];}};
+  const view:any={...methods,editing:true,saving:false,dbEditor:{edit:null},editText:'甲\n乙',$refs:{editor:target},$nextTick:(fn:()=>void)=>fn()};
+  methods.insertTodo.call(view);
+  assert.equal(view.editText,'甲\n- [ ] 乙');
+  assert.equal(target.focusCalls,1);        // 焦点回到正文,保持光标可见
+  assert.deepEqual(target.range,[8,8]);     // 光标落在目标行复选框之后
+  target.selectionStart=8;methods.insertTodo.call(view);
+  assert.equal(view.editText,'甲\n乙');
+  assert.deepEqual(target.range,[2,2]);     // 取消待办后光标回到该行行首
+});
+
 test('cases-search-input debounces latin input, filters IME composition and keeps explicit clear',()=>{
   const ui=uiHarness(),component=ui.components['cases-search-input'];
   // Component methods close over the vm harness global, so fake timers there (not in this realm).
