@@ -325,6 +325,23 @@ test('toolbar taps keep the editor focused and leave the caret on the toggled li
   assert.deepEqual(target.range,[2,2]);     // 取消待办后光标回到该行行首
 });
 
+test('toolbar touch toggles on the first contact and a synthesized click never doubles it',()=>{
+  const ui=uiHarness(),methods=ui.components['cases-view'].methods;
+  const target:any={selectionStart:2,selectionEnd:2,focusCalls:0,range:null,
+    focus(){this.focusCalls++;},setSelectionRange(start:number,end:number){this.range=[start,end];}};
+  const view:any={...methods,editing:true,saving:false,dbEditor:{edit:null},editText:'甲\n乙',$refs:{editor:target},$nextTick:(fn:()=>void)=>fn()};
+  const event=(x:number,y:number)=>({preventDefault(){},changedTouches:[{clientX:x,clientY:y}],target:{closest:()=>({getAttribute:()=>'todo'})}});
+  methods.toolbarTouchStart.call(view,event(10,10));
+  methods.toolbarTouchEnd.call(view,event(11,11));   // 触摸按 touchstart 目标派发,首次接触即切换
+  assert.equal(view.editText,'甲\n- [ ] 乙');
+  methods.toolbarClick.call(view,'todo');            // 紧随的合成 click 不重复执行
+  assert.equal(view.editText,'甲\n- [ ] 乙');
+  const moved:any={...view,editText:'甲\n- [ ] 乙'};
+  methods.toolbarTouchStart.call(moved,event(10,10));
+  methods.toolbarTouchEnd.call(moved,event(10,80));  // 从按钮起手纵向滚动:不触发
+  assert.equal(moved.editText,'甲\n- [ ] 乙');
+});
+
 test('cases-search-input debounces latin input, filters IME composition and keeps explicit clear',()=>{
   const ui=uiHarness(),component=ui.components['cases-search-input'];
   // Component methods close over the vm harness global, so fake timers there (not in this realm).

@@ -65,6 +65,8 @@ function rememberCase(c){
   return item;
 }
 let statsJob=null,prefetchEpoch=-1,firstScreenReady=false;
+// 编辑工具栏的触摸手势状态:触摸事件按 touchstart 的目标派发,布局跳动后仍能命中;合成 click 需要去重
+let editorToolbarTouch=null,editorToolbarHandledAt=0;
 function prepareViews(){
   if(state.viewsReady||state.loggingOut||!state.D)return;
   const swiper=document.querySelector('.view-pages')?.swiper;
@@ -390,6 +392,34 @@ app.component('cases-view', {
     },
     keepEditorFocus(event){  // 工具栏是编辑区的一部分:夺取焦点会收起输入法,并触发 :has(:focus) 布局跳动,令首次点击落空且看不到光标
       event.preventDefault();
+    },
+    toolbarTarget(target){  // 触摸事件保留 touchstart 的目标,合成 click 可能因布局跳动而落空
+      const el=target&&target.closest?target.closest('[data-toolbar]'):null;
+      return el?el.getAttribute('data-toolbar'):null;
+    },
+    toolbarRun(action){
+      if(this.saving||!action)return;
+      if(action==='schedule')this.openDlg();
+      else if(action==='todo')this.insertTodo();
+    },
+    toolbarTouchStart(event){  // 取消触摸默认动作用来尽量不夺取正文焦点、不收起输入法
+      event.preventDefault();
+      const t=event.changedTouches&&event.changedTouches[0];
+      editorToolbarTouch=t?{x:t.clientX,y:t.clientY,action:this.toolbarTarget(event.target)}:null;
+    },
+    toolbarTouchEnd(event){
+      const start=editorToolbarTouch;editorToolbarTouch=null;
+      if(!start||!start.action)return;
+      const t=event.changedTouches&&event.changedTouches[0];
+      if(t&&Math.hypot(t.clientX-start.x,t.clientY-start.y)>12)return;  // 从按钮起手纵向滚动时不触发
+      event.preventDefault();
+      editorToolbarHandledAt=Date.now();
+      this.toolbarRun(start.action);
+    },
+    toolbarTouchCancel(){editorToolbarTouch=null;},
+    toolbarClick(action){  // 桌面鼠标与键盘走 click;刚由触摸处理过的合成 click 不再重复执行
+      if(Date.now()-editorToolbarHandledAt<600)return;
+      this.toolbarRun(action);
     },
     insertTodo(){  // 待办 → 行首复选框循环:无 ↔ 空复选框(- [ ]);- [x] 不参与循环
       if(this.saving)return;
