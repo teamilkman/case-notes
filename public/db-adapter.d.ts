@@ -1,9 +1,10 @@
 export function legacyView(cases: any[], rows: any[]): any;
 export interface EditorRow {line_id?:string;text:string;}
 export interface CaseDocument {ref:string;revision:number;text:string;lines:EditorRow[];case?:unknown;}
-export interface NoteEditor {ref:string;revision:number;rows:EditorRow[];text:string;edit:{start:number;end:number;inputType:string}|null;draftUnversioned:boolean;draftNotice:string;}
+export interface NoteEditor {ref:string;revision:number;rows:EditorRow[];text:string;edit:{start:number;end:number;inputType:string}|null;draftUnversioned:boolean;draftNotice:string;metadata?:{expected_metadata_version:number;fields:Record<string,unknown>};}
 export function beginEdit(doc:CaseDocument):NoteEditor;
 export function changeEdit(editor:NoteEditor,next:string):void;
+export function changeMetadata(editor:NoteEditor,metadata:NoteEditor['metadata']):void;
 export function restoreDraft(editor:NoteEditor):string;
 export function save(editor:NoteEditor):Promise<any>;
 export function createCase(fields:{name:string;kind:'case'|'affair'}):Promise<any>;

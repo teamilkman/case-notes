@@ -213,7 +213,9 @@ function activityItem(r){return {line_id:r.line_id,path:r.case_id,案件:r.case_
 async function readCase(ref){
   return reads.entry('case:'+ref).ensure(async()=>{await ensureSession();const result=await all('cases_get',{case_ref:ref});return {ref,case:result.case,revision:result.document_revision,lines:result.lines,text:result.lines.map(l=>l.text).join('\n')};});
 }
-export function beginEdit(doc){return {ref:doc.ref,revision:doc.revision,rows:doc.lines.map(l=>({line_id:l.line_id,text:l.text})),text:doc.text,edit:null,draftUnversioned:false,draftNotice:''};}
+export function beginEdit(doc){return {ref:doc.ref,revision:doc.revision,rows:doc.lines.map(l=>({line_id:l.line_id,text:l.text})),text:doc.text,edit:null,draftUnversioned:false,draftNotice:'',metadata:undefined};}
+function storeDraft(editor){sessionStorage.setItem('case-notes:draft:'+editor.ref,JSON.stringify({format:1,revision:editor.revision,rows:editor.rows,unversioned:editor.draftUnversioned,...(editor.metadata?{metadata:editor.metadata}:{})}));}
+export function changeMetadata(editor,metadata){editor.metadata=metadata;storeDraft(editor);}
 export function changeEdit(editor,next){
   migrateSessionStorage();
   let range=editor.edit;editor.edit=null;
@@ -229,12 +231,10 @@ export function changeEdit(editor,next){
     // Keep the editor aligned with the visible draft after a genuine failure;
     // subsequent typing must not repeatedly compare against outdated text.
     editor.text=next;editor.rows=next.split('\n').map(text=>({text}));editor.draftUnversioned=true;
-    sessionStorage.setItem('case-notes:draft:'+editor.ref,JSON.stringify({format:1,revision:editor.revision,
-      rows:editor.rows,unversioned:true}));
+    storeDraft(editor);
     throw error;
   }
-  sessionStorage.setItem('case-notes:draft:'+editor.ref,JSON.stringify({format:1,revision:editor.revision,
-    rows:editor.rows,unversioned:editor.draftUnversioned}));
+  storeDraft(editor);
 }
 export function restoreDraft(editor){
   migrateSessionStorage();
@@ -243,11 +243,12 @@ export function restoreDraft(editor){
   const versioned=draft?.format===1&&Number.isInteger(draft.revision)&&draft.revision>0
     &&Array.isArray(draft.rows)&&draft.rows.every(l=>l&&typeof l.text==='string'&&(l.line_id===undefined||typeof l.line_id==='string'));
   const text=versioned?draft.rows.map(l=>l.text).join('\n'):stored;
-  if(text!==editor.text&&confirm('发现此案件未保存的草稿，是否恢复？')){
+  if((text!==editor.text||versioned&&draft.metadata)&&confirm('发现此案件未保存的草稿，是否恢复？')){
     const currentRevision=editor.revision;
     if(versioned){
       editor.revision=draft.revision;editor.rows=draft.rows.map(l=>({...l}));editor.text=text;editor.edit=null;
       editor.draftUnversioned=!!draft.unversioned;
+      editor.metadata=draft.metadata;
     }else{
       // Old plain-text drafts have no trustworthy base. Keep them available to
       // copy, but never silently give them the current server revision.
@@ -263,7 +264,7 @@ function discardDraft(ref){sessionStorage.removeItem('case-notes:draft:'+ref);}
 export async function save(editor){
   await ensureOnline();
   if(editor.draftUnversioned){const e=new Error('旧草稿缺少基准版本。请复制草稿，取消编辑后核对最新正文再修改。');e.code='DRAFT_CONFLICT';throw e;}
-  const job=pending('save',editor.ref,{case_ref:editor.ref,expected_document_revision:editor.revision,lines:editor.rows});
+  const job=pending('save',editor.ref,{case_ref:editor.ref,expected_document_revision:editor.revision,lines:editor.rows,...(editor.metadata?{metadata:editor.metadata}:{})});
   try {const receipt=await request('/api/web/save-notes',job.args);job.clear();sessionStorage.removeItem('case-notes:draft:'+editor.ref);return receipt;}
   catch(e){if(!e.retryable&&e.commitState!=='unknown')job.clear();throw e;}
 }
@@ -314,4 +315,4 @@ function sanitize(html){
   }
   return doc.body.innerHTML;
 }
-if(typeof window!=='undefined')window.DB={connection,reconnect,resume,web,pager,peek:peekPage,feed,calendar,readCalendar,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,save,createCase,pendingCreate,updateCase,pendingMetadata,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};
+if(typeof window!=='undefined')window.DB={connection,reconnect,resume,web,pager,peek:peekPage,feed,calendar,readCalendar,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,changeMetadata,save,createCase,pendingCreate,updateCase,pendingMetadata,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};

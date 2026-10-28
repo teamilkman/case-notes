@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { authenticate, checkOrigin, login, logout } from './auth';
-import { schemas, outputSchemas, errorResponseSchema, descriptions, instructions } from './schemas';
+import { schemas, outputSchemas, errorResponseSchema, descriptions, instructions, webNotesSchema } from './schemas';
 import { completeTodo, executeTool, resolveCase, saveNotes, toolNames } from './service';
 import { changeToken } from './queries';
 import { AppError, failure, success, type Env } from './types';
@@ -19,8 +19,6 @@ async function body(request:Request) {
   try{return JSON.parse(new TextDecoder().decode(all));}catch{throw new AppError('INVALID_ARGUMENT','请求体不是有效 JSON。');}
 }
 const webTodo=z.object({case_ref:z.string().min(1),line_id:z.string().min(1),expected_line_version:z.number().int().positive(),request_key:z.string().min(8).max(128)}).strict();
-const webNotes=z.object({case_ref:z.string().min(1),expected_document_revision:z.number().int().positive(),
-  lines:z.array(z.object({line_id:z.string().optional(),text:z.string().max(16_384)}).strict()).max(5000),request_key:z.string().min(8).max(128)}).strict();
 function validated(schema:z.ZodType,value:unknown){const result=schema.safeParse(value);if(!result.success)throw new AppError('INVALID_ARGUMENT','参数格式不正确。',result.error.issues);return result.data as any;}
 const makeOpenapi=()=>{
   const errorResponse={description:'业务错误，按 error.next_action 处理',content:{'application/json':{schema:z.toJSONSchema(errorResponseSchema,{target:'draft-7',io:'output'})}}};
@@ -61,7 +59,7 @@ export default {
         }
         if(path.startsWith('/api/v1/')&&request.method==='POST')return json(await executeTool(env,p,path.slice('/api/v1/'.length),await body(request)));
         if(path==='/api/web/complete-todo'&&request.method==='POST')return json(await completeTodo(env,p,validated(webTodo,await body(request))));
-        if(path==='/api/web/save-notes'&&request.method==='POST')return json(await saveNotes(env,p,validated(webNotes,await body(request))));
+        if(path==='/api/web/save-notes'&&request.method==='POST')return json(await saveNotes(env,p,validated(webNotesSchema,await body(request))));
         if(path.startsWith('/api/web/')&&request.method==='POST')return json(await webRead(env,p,path.slice('/api/web/'.length),await body(request)));
         if(path==='/api/web/history'&&request.method==='GET') {
           if(p.source!=='web')throw new AppError('PERMISSION_DENIED','操作历史通过网页查看。',null,403);

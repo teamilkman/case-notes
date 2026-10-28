@@ -46,25 +46,25 @@
 .create-dialog .errbar{margin:16px 0 0}
 @media(max-width:760px){.create-dialog select{font-size:16px}}
 /* Responsive surfaces */
-.metadata-trigger{display:inline;border:0;background:none;color:inherit;font:inherit;text-align:left;line-height:inherit;padding:0;max-width:100%;overflow-wrap:anywhere;cursor:pointer}
-.metadata-trigger .ui-icon{width:14px;height:14px;color:var(--text-3);vertical-align:baseline}
-.metadata-trigger:enabled:hover{color:var(--accent)}
-.metadata-trigger:disabled{cursor:default;opacity:1}
-.editing-metadata :is(input,select){min-width:0;max-width:100%;border:0;border-radius:0;padding:2px 0;background:linear-gradient(var(--metadata-rule,var(--border)),var(--metadata-rule,var(--border))) left calc(50% + .75em)/100% 1px no-repeat transparent;color:var(--text);font:inherit;line-height:inherit;box-shadow:none}
-.editing-metadata :is(input,select):focus{--metadata-rule:var(--accent);outline:none;box-shadow:none}
-.editing-metadata .meta-name{width:100%}
-.editing-metadata .c-meta>div{min-width:100px;flex:1}
-.editing-metadata .c-meta input{width:100%;font-size:13px}
+.metadata-field{display:inline-grid;grid-template-columns:minmax(0,1fr);align-content:center;width:max-content;min-width:6ch;max-width:100%;vertical-align:middle;cursor:text}
+.metadata-field::after{content:attr(data-value);grid-area:1/1;visibility:hidden;white-space:pre-wrap;overflow-wrap:anywhere;padding:2px 0;font:inherit;line-height:inherit;pointer-events:none;min-width:0}
+.metadata-field textarea,.editing-metadata input[type=date]{border:0;border-radius:0;padding:2px 0;background:linear-gradient(var(--metadata-rule,var(--border)),var(--metadata-rule,var(--border))) left bottom 2px/100% 1px no-repeat transparent;color:var(--text);font:inherit;line-height:inherit;box-shadow:none}
+.metadata-field textarea{grid-area:1/1;resize:none;overflow:hidden;width:0;min-width:100%;max-width:100%;height:100%;min-height:0}
+.metadata-field textarea:focus,.editing-metadata input[type=date]:focus{--metadata-rule:var(--accent);outline:none;box-shadow:none}
+.editing-metadata .c-meta>div{min-width:0;max-width:100%;flex:0 1 auto;align-items:center}
+.editing-metadata .c-meta .metadata-field{font-size:13px;line-height:1.6;color:var(--text)}
 .editing-metadata .c-dates input{width:132px;font-size:12px}
 .editing-metadata .errbar{flex:none}
+.metadata-status{flex:none;max-width:100%;border:0;border-radius:0;background:linear-gradient(var(--metadata-rule,var(--border)),var(--metadata-rule,var(--border))) left calc(50% + .8em - .5px)/100% 1px no-repeat transparent;color:var(--text);font:inherit;font-size:13px;line-height:1.6;height:calc(1.6em + 4px);padding:2px 0;cursor:pointer}
+.metadata-status:focus{--metadata-rule:var(--accent);outline:none}
 @media(max-width:760px),(pointer:coarse) and (max-width:1024px) and (max-height:500px){
-  .case-detail.editing-metadata :is(input,select){min-height:44px;font-size:16px}
-  .metadata-trigger{min-height:44px}
+  .case-detail.editing-metadata .metadata-field{min-height:44px;font-size:16px}
+  .case-detail.editing-metadata input[type=date]{min-height:44px;font-size:16px}
+  .metadata-status{min-height:44px;font-size:16px}
   .case-detail.editing-metadata .cd-head{flex-wrap:nowrap}
   .case-detail.editing-metadata .cd-head h2{flex:1 1 0}
-  .case-detail.editing-metadata .c-meta{gap:4px 12px}
-  .case-detail.editing-metadata .c-meta>div{flex:1 1 140px}
-  .case-detail.editing-metadata .c-meta input{flex:1}
+  .case-detail.editing-metadata .c-meta{gap:4px 12px;align-items:center}
+  .case-detail.editing-metadata .c-meta>div{flex:0 1 auto}
   .case-detail.editing-metadata .c-dates{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
 }
 @media(min-width:761px) and (max-width:1100px){.app-header{padding:14px 20px;gap:16px}.brand span,.header-date{display:none}.seg button{padding:5px 16px}.board-wrap,.cases-wrap{padding:14px 16px 16px}.board,.cases-layout{gap:14px}.col{padding:16px 10px 10px}.cases-left{flex-basis:290px}.cases-right{padding:22px 20px}.cd-head{flex-wrap:wrap}.c-meta{gap:16px}.c-recent{display:none}.col h2 .win-toggle button{padding:4px 7px}.md-split{gap:12px}}
@@ -152,7 +152,7 @@
 
 .cal-detail{scroll-margin-top:72px}
 .hm-cell{position:relative}
-@media(max-width:760px),(pointer:coarse) and (max-width:1024px) and (max-height:500px){.cases-wrap.is-editing .case-meta{display:none}.cases-wrap.is-editing .cd-head{margin-bottom:10px}.cases-wrap.is-editing .notes-head{margin-bottom:8px}.cases-wrap.is-editing .notes-head h3{display:none}}
+@media(max-width:760px),(pointer:coarse) and (max-width:1024px) and (max-height:500px){.cases-wrap.is-editing .cd-head{margin-bottom:10px}.cases-wrap.is-editing .notes-head{margin-bottom:8px}.cases-wrap.is-editing .notes-head h3{display:none}}
 
 @media(min-width:1101px) and (max-width:1399px){.header-date{display:none}}
 @media(max-width:1100px){.app-header{flex-wrap:wrap;gap:8px 16px;padding:8px 16px}.header-stats{order:4;flex-basis:100%;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-left:0}.header-stat{justify-content:center;padding:5px 8px}.h-right{margin-left:auto}}
@@ -310,7 +310,6 @@
   .cal-month-picker .nav{min-width:44px;min-height:44px}
   #app:has(.md-editor:focus) .tabbar,#app:has(.md-editor:focus) .header-stats{display:none}
   #app>div:has(.md-editor:focus){padding-bottom:env(safe-area-inset-bottom,0px)}
-  .cases-wrap.is-editing:has(.md-editor:focus) .cd-head h2{display:none}
 }
 @media(pointer:coarse) and (max-width:1024px) and (max-height:500px){
   .header-stat{padding:0;gap:4px;border:0;background:none}.header-stat b{font-size:13px}.header-stat>span{font-size:11px}
@@ -382,8 +381,8 @@
 .offline-bar .mini-btn{flex:none;min-height:44px}
 .sync-bar{justify-content:flex-start}
 .cases-layout:not(.is-mobile) .editing-metadata .case-meta{flex-wrap:nowrap}
-.cases-layout:not(.is-mobile) .editing-metadata .c-meta{flex:1;min-width:0;gap:4px 12px}
-.cases-layout:not(.is-mobile) .editing-metadata .c-meta>div{flex:1;min-width:0}
-.cases-layout:not(.is-mobile) .editing-metadata .c-meta input{flex:1;min-width:0;width:100%}
+.cases-layout:not(.is-mobile) .editing-metadata .c-meta{flex:1;min-width:0;gap:4px 12px;align-items:center}
+.cases-layout:not(.is-mobile) .editing-metadata .c-meta>div{flex:0 1 auto;min-width:0;max-width:100%;align-items:center}
+.cases-layout:not(.is-mobile) .editing-metadata .c-meta .metadata-field{font-size:13px;line-height:1.6}
 .cases-layout:not(.is-mobile) .editing-metadata .c-dates{flex:none}
 @media(min-width:761px) and (max-width:1100px){.cases-layout:not(.is-mobile) .editing-metadata .case-meta{flex-wrap:wrap}}

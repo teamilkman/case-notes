@@ -268,7 +268,7 @@
 
 <template id="cases-tpl">
   <main class="cases-wrap" :class="{'has-sel':!!selCase,'is-editing':editing}">
-    <page-deck class="cases-layout" label="案件列表与详情，右滑返回上级" :model-value="selCase?'detail':'list'" :items="['list','detail']" desktop="columns" :disabled="!selCase||editing||saving||dlg||createDlg||metaDlg||($state.caseParent&&$state.caseParent!=='cases')" contain @update:model-value="detailSwiped" @settled="detailSettled">
+    <page-deck class="cases-layout" label="案件列表与详情，右滑返回上级" :model-value="selCase?'detail':'list'" :items="['list','detail']" desktop="columns" :disabled="!selCase||editing||saving||dlg||createDlg||($state.caseParent&&$state.caseParent!=='cases')" contain @update:model-value="detailSwiped" @settled="detailSettled">
     <template #default="{item}">
     <div v-if="item==='list'" class="cases-left">
       <div class="cases-filter"><div class="cases-list-title"><h3>{{ group==='事务'?'事务':group+'案件' }} <span>{{ feed.total??'—' }} 项</span></h3><button class="mini-btn primary" :disabled="saving||$state.connection.offline" @click="openCreate">新建笔记</button></div>
@@ -297,34 +297,29 @@
       </page-deck>
     </div>
     <div v-if="item==='detail'" class="cases-right">
-      <div v-if="sel" class="case-detail" :class="{'editing-metadata':metaDlg}" @keydown.esc="metaDlg&&closeMetadata()">
-        <form v-if="metaDlg" id="case-metadata-form" @submit.prevent="submitMetadata"></form>
+      <div v-if="sel" class="case-detail" :class="{'editing-metadata':editing}">
+        <form v-if="editing" id="case-edit-form" @submit.prevent="saveEdit"></form>
         <div class="cd-head">
-          <button class="mini-btn back-btn" :disabled="saving" @click="backToList"><ui-icon name="back"></ui-icon>{{ editing||metaDlg?'返回详情':backLabel }}</button>
-          <h2><input v-if="metaDlg" ref="metaName" form="case-metadata-form" class="meta-name" aria-label="案件名称" v-model="metaForm.name" required maxlength="200" :readonly="metaPending" :disabled="saving"><button v-else-if="!editing" ref="metadataTrigger" class="metadata-trigger" :aria-label="'编辑案件资料：'+sel.名称" title="编辑名称和案件资料" :disabled="saving||mdLoading||mdErr||!dbDoc||$state.connection.offline" @click="openMetadata()">{{ sel.名称 }} <ui-icon name="edit"></ui-icon></button><template v-else>{{ sel.名称 }}</template></h2>
+          <button class="mini-btn back-btn" :disabled="saving" @click="backToList"><ui-icon name="back"></ui-icon>{{ editing?'返回详情':backLabel }}</button>
+          <h2><elastic-field v-if="editing" ref="metaName" form="case-edit-form" aria-label="案件名称" v-model="metaForm.name" required maxlength="200" :disabled="saving"></elastic-field><template v-else>{{ sel.名称 }}</template></h2>
           <div class="cd-actions">
-            <template v-if="metaDlg">
-              <button class="mini-btn primary" form="case-metadata-form" type="submit" :disabled="saving||metaConflict||$state.connection.offline">{{ saving?'保存中…':metaPending?'重试保存':'保存' }}</button>
-              <button class="mini-btn" :disabled="saving" @click="closeMetadata">取消</button>
-            </template>
-            <template v-else-if="!editing">
-              <button class="mini-btn" :disabled="mdLoading||mdErr||dbDoc?.case?.status!=='在办'" @click="enterEdit"><ui-icon name="edit"></ui-icon>编辑笔记</button>
+            <template v-if="!editing">
+              <button ref="editTrigger" class="mini-btn" :disabled="mdLoading||mdErr||!dbDoc||$state.connection.offline" @click="enterEdit"><ui-icon name="edit"></ui-icon>编辑笔记</button>
             </template>
             <template v-else>
-              <div class="edit-tabs compact-edit-tabs"><button :aria-pressed="editPane==='write'" :class="{on:editPane==='write'}" @click="editPane='write'">编辑</button><button :aria-pressed="editPane==='preview'" :class="{on:editPane==='preview'}" @click="editPane='preview'">预览</button></div>
-              <button class="mini-btn primary" :disabled="saving||$state.connection.offline" @click="saveEdit">{{ saving ? '保存中…' : '保存' }}</button>
+              <div v-if="canEditBody" class="edit-tabs compact-edit-tabs"><button :aria-pressed="editPane==='write'" :class="{on:editPane==='write'}" @click="editPane='write'">编辑</button><button :aria-pressed="editPane==='preview'" :class="{on:editPane==='preview'}" @click="editPane='preview'">预览</button></div>
+              <button class="mini-btn primary" form="case-edit-form" type="submit" :disabled="saving||editConflict||$state.connection.offline">{{ saving ? '保存中…' : '保存' }}</button>
               <button class="mini-btn" :disabled="saving" @click="cancelEdit">取消</button>
             </template>
           </div>
         </div>
         <div class="case-meta">
-          <div class="c-meta"><select v-if="metaDlg" form="case-metadata-form" aria-label="案件状态" v-model="metaForm.status" :disabled="saving||metaPending"><option v-for="s in ['在办','结案','结案未整卷','解除委托']" :key="s">{{ s }}</option></select><status-badge v-else :st="sel.状态"></status-badge><div><span>案由</span><input v-if="metaDlg" form="case-metadata-form" aria-label="案由" v-model="metaForm.cause" maxlength="1000" :readonly="metaPending" :disabled="saving"><b v-else>{{ sel.案由||'未填写' }}</b></div><div><span>案号</span><input v-if="metaDlg" form="case-metadata-form" aria-label="案号" v-model="metaForm.case_number" maxlength="1000" :readonly="metaPending" :disabled="saving"><b v-else>{{ sel.案号||'未填写' }}</b></div><div><span>法院</span><input v-if="metaDlg" form="case-metadata-form" aria-label="法院" v-model="metaForm.court" maxlength="1000" :readonly="metaPending" :disabled="saving"><b v-else>{{ sel.法院||'未填写' }}</b></div></div>
-          <div class="c-dates"><template v-if="metaDlg">创建 <input form="case-metadata-form" type="date" aria-label="创建日期" v-model="metaForm.opened_date" :readonly="metaPending" :disabled="saving"></template><template v-else>创建 {{ sel.创建||'-' }}</template> ｜ 最近活动 {{ sel.最近活动||'-' }}</div>
+          <div class="c-meta"><select v-if="editing" class="metadata-status" form="case-edit-form" aria-label="案件状态" v-model="metaForm.status" :disabled="saving"><option v-for="s in ['在办','结案','结案未整卷','解除委托']" :key="s">{{ s }}</option></select><status-badge v-else :st="sel.状态"></status-badge><div v-for="f in [{key:'cause',label:'案由',value:sel.案由},{key:'case_number',label:'案号',value:sel.案号},{key:'court',label:'法院',value:sel.法院}]" :key="f.key"><span>{{ f.label }}</span><elastic-field v-if="editing" form="case-edit-form" :aria-label="f.label" v-model="metaForm[f.key]" maxlength="1000" :disabled="saving"></elastic-field><b v-else>{{ f.value||'未填写' }}</b></div></div>
+          <div class="c-dates"><template v-if="editing">创建 <input form="case-edit-form" type="date" aria-label="创建日期" v-model="metaForm.opened_date" :disabled="saving"></template><template v-else>创建 {{ sel.创建||'-' }}</template> ｜ 最近活动 {{ sel.最近活动||'-' }}</div>
         </div>
-        <div v-if="metaDlg&&metaPending" class="errbar" role="status">上次保存结果尚未确认，请重试以核对结果。</div>
-        <div v-if="metaDlg&&metaError" class="errbar" role="alert">{{ metaError }} <button v-if="metaConflict" class="mini-btn" :disabled="mdLoading||$state.connection.offline" @click="openMetadata(true)">重新载入最新信息</button></div>
-        <div class="notes-head"><h3>{{ editing?'编辑笔记':'工作记录' }}</h3><span v-if="editing" class="edit-state">{{ saving?'正在保存…':editText!==mdText?'有未保存的修改':'编辑模式' }}</span><span v-else-if="mdLoading&&mdText" class="edit-state">正在同步…</span><span v-else-if="dbDoc?.case?.status!=='在办'" class="readonly-note"><ui-icon name="lock"></ui-icon>归档笔记只读</span></div>
-        <template v-if="!editing">
+        <div v-if="editing&&editError" class="errbar" role="alert">{{ editError }}</div>
+        <div class="notes-head"><h3>{{ editing?'编辑笔记':'工作记录' }}</h3><span v-if="editing" class="edit-state">{{ saving?'正在保存…':hasEdits?'有未保存的修改':'编辑模式' }}</span><span v-else-if="mdLoading&&mdText" class="edit-state">正在同步…</span><span v-if="!canEditBody" class="readonly-note"><ui-icon name="lock"></ui-icon>归档笔记只读</span></div>
+        <template v-if="!editing||!canEditBody">
           <div class="case-content">
           <loading-skeleton v-if="mdLoading&&!mdText" kind="notes" :rows="5" label="正在加载案件笔记"></loading-skeleton>
           <div v-else-if="mdErr" class="md-loading">加载失败，<a href="#" @click.prevent="loadMd()">点击重试</a></div>
@@ -333,8 +328,8 @@
           </div>
         </template>
         <div v-if="editing&&dbEditor?.draftNotice" class="errbar" role="status">{{ dbEditor.draftNotice }}</div>
-        <div v-if="editing" class="edit-tabs" :style="{'--active-tab':editPane==='preview'?1:0}"><button :aria-pressed="editPane==='write'" :class="{on:editPane==='write'}" @click="editPane='write'">编辑</button><button :aria-pressed="editPane==='preview'" :class="{on:editPane==='preview'}" @click="editPane='preview'">预览</button></div>
-        <page-deck v-if="editing" class="md-split" label="编辑和预览，左右滑动切换" v-model="editPane" :items="['write','preview']" desktop="columns" :disabled="saving||dlg" contain>
+        <div v-if="editing&&canEditBody" class="edit-tabs" :style="{'--active-tab':editPane==='preview'?1:0}"><button :aria-pressed="editPane==='write'" :class="{on:editPane==='write'}" @click="editPane='write'">编辑</button><button :aria-pressed="editPane==='preview'" :class="{on:editPane==='preview'}" @click="editPane='preview'">预览</button></div>
+        <page-deck v-if="editing&&canEditBody" class="md-split" label="编辑和预览，左右滑动切换" v-model="editPane" :items="['write','preview']" desktop="columns" :disabled="saving||dlg" contain>
           <template #default="{item}">
           <div v-if="item==='write'" class="md-left"><span class="editor-pane-label">笔记正文</span>
             <div class="md-toolbar" @touchstart="toolbarTouchStart" @touchend="toolbarTouchEnd" @touchcancel="toolbarTouchCancel">

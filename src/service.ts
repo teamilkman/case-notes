@@ -162,6 +162,16 @@ function auditNewLines(env:Env,p:Principal,tx:Tx,cid:string,entries:IndexEntry[]
     [tx.operationId,p.workspaceId,cid,p.actorId,p.clientId,p.source,tx.time,JSON.stringify(entries.map(e=>e.id)),tx.operationId,cid]));
 }
 function bump(env:Env,tx:Tx,cid:string) { tx.statements.push(stmt(env.DB,'UPDATE cases SET document_revision=document_revision+1,updated_at=? WHERE id=?',[tx.time,cid])); }
+async function stageMetadata(env:Env,p:Principal,tx:Tx,c:CaseRow,fields:Args,expected:number,document?:{revision:number;writable:boolean}){
+  sameVersion(c.metadata_version,expected,c);
+  guard(env,tx,`(SELECT COUNT(*) FROM cases WHERE id=? AND workspace_id=? AND metadata_version=?${document?` AND document_revision=?${document.writable?" AND status='在办'":''}`:''})=1`,[c.id,p.workspaceId,expected,...(document?[document.revision]:[])]);
+  const keys=Object.keys(fields).filter(k=>k!=='aliases');
+  tx.statements.push(stmt(env.DB,`UPDATE cases SET ${keys.map(k=>`${k}=?`).concat('metadata_version=metadata_version+1','updated_at=?').join(',')} WHERE id=?`,[...keys.map(k=>fields[k]),tx.time,c.id]));
+  if(fields.aliases!==undefined){tx.statements.push(stmt(env.DB,'DELETE FROM case_aliases WHERE case_id=?',[c.id]));
+    if(fields.aliases.length)tx.statements.push(stmt(env.DB,'INSERT INTO case_aliases(case_id,alias) SELECT ?,value FROM json_each(?)',[c.id,JSON.stringify([...new Set(fields.aliases)])]));}
+  const aliases=await stmt(env.DB,'SELECT alias FROM case_aliases WHERE case_id=?',[c.id]).all<{alias:string}>();
+  audit(env,p,tx,c.id,null,{...c,aliases:aliases.results.map(x=>x.alias)},{...c,...fields,metadata_version:c.metadata_version+1});
+}
 function auditDiffs(env:Env,p:Principal,tx:Tx,cid:string,diffs:unknown[]) {
   for(const chunk of jsonChunks(diffs))tx.statements.push(stmt(env.DB,`INSERT INTO audit_changes SELECT 'audit_'||json_extract(value,'$.line_id')||'_'||?,?,?,?,json_extract(value,'$.line_id'),?,?,?,?,
     json_extract(value,'$.before'),json_extract(value,'$.after'),? FROM json_each(?)`,[tx.operationId,tx.operationId,p.workspaceId,cid,p.actorId,p.clientId,p.source,tx.action,tx.time,chunk]));
@@ -240,14 +250,7 @@ async function write(env:Env,p:Principal,tool:ToolName,a:Args) {
   }
   const c=await resolveCase(env,p,a.case_ref);
   if(tool==='cases_update') {
-    sameVersion(c.metadata_version,a.expected_metadata_version,c);
-    guard(env,tx,'(SELECT COUNT(*) FROM cases WHERE id=? AND workspace_id=? AND metadata_version=?)=1',[c.id,p.workspaceId,a.expected_metadata_version]);
-    const keys=Object.keys(a.fields).filter(k=>k!=='aliases');
-    tx.statements.push(stmt(db,`UPDATE cases SET ${keys.map(k=>`${k}=?`).concat('metadata_version=metadata_version+1','updated_at=?').join(',')} WHERE id=?`,[...keys.map(k=>a.fields[k]),tx.time,c.id]));
-    if(a.fields.aliases!==undefined){tx.statements.push(stmt(db,'DELETE FROM case_aliases WHERE case_id=?',[c.id]));
-      if(a.fields.aliases.length)tx.statements.push(stmt(db,'INSERT INTO case_aliases(case_id,alias) SELECT ?,value FROM json_each(?)',[c.id,JSON.stringify([...new Set(a.fields.aliases)])]));}
-    const aliases=await stmt(db,'SELECT alias FROM case_aliases WHERE case_id=?',[c.id]).all<{alias:string}>();
-    audit(env,p,tx,c.id,null,{...c,aliases:aliases.results.map(x=>x.alias)},{...c,...a.fields,metadata_version:c.metadata_version+1});
+    await stageMetadata(env,p,tx,c,a.fields,a.expected_metadata_version);
     return finish(env,p,tx,c.id,{changed:1,fields:a.fields});
   }
   writable(c);
@@ -305,7 +308,7 @@ export async function saveNotes(env:Env,p:Principal,a:Args) {
 }
 async function saveNotesAttempt(env:Env,p:Principal,a:Args) {
   const attempt=await startTx(env,p,'web_save_notes',a);if('replay'in attempt)return attempt.replay;
-  const tx=attempt,c=await resolveCase(env,p,a.case_ref);writable(c);sameVersion(c.document_revision,a.expected_document_revision,c);
+  const tx=attempt,c=await resolveCase(env,p,a.case_ref);sameVersion(c.document_revision,a.expected_document_revision,c);
   const old=(await stmt(env.DB,'SELECT * FROM log_lines WHERE case_id=? AND deleted_at IS NULL ORDER BY sort_order',[c.id]).all<LineRow>()).results;
   const byId=new Map(old.map(l=>[l.id,l])); const seen=new Set<string>();
   const entries=a.lines.map((l:any,n:number)=>{
@@ -316,11 +319,14 @@ async function saveNotesAttempt(env:Env,p:Principal,a:Args) {
       parsed:!before||before.raw_text!==l.text?parseLine(l.text):undefined,before};
   });
   assignOrder(entries);
-  guard(env,tx,'(SELECT COUNT(*) FROM cases WHERE id=? AND workspace_id=? AND status=? AND document_revision=?)=1',[c.id,p.workspaceId,'在办',a.expected_document_revision]);
   const removed=old.filter(l=>!seen.has(l.id));
-  for(const chunk of jsonChunks(removed.map(l=>l.id)))tx.statements.push(stmt(env.DB,'UPDATE log_lines SET deleted_at=?,updated_at=?,version=version+1 WHERE id IN (SELECT value FROM json_each(?))',[tx.time,tx.time,chunk]));
   const changed=entries.filter((e:any)=>!e.before||e.before.raw_text!==e.text);
   const moved=entries.filter((e:any)=>e.before&&e.sort_order!==e.before.sort_order);
+  const bodyChanged=!!(removed.length||changed.length||moved.length);
+  if(bodyChanged||!a.metadata)writable(c);
+  if(a.metadata)await stageMetadata(env,p,tx,c,a.metadata.fields,a.metadata.expected_metadata_version,{revision:a.expected_document_revision,writable:bodyChanged});
+  else guard(env,tx,"(SELECT COUNT(*) FROM cases WHERE id=? AND workspace_id=? AND document_revision=? AND status='在办')=1",[c.id,p.workspaceId,a.expected_document_revision]);
+  for(const chunk of jsonChunks(removed.map(l=>l.id)))tx.statements.push(stmt(env.DB,'UPDATE log_lines SET deleted_at=?,updated_at=?,version=version+1 WHERE id IN (SELECT value FROM json_each(?))',[tx.time,tx.time,chunk]));
   stageMoves(env,tx,moved,old);
   const written=entries.filter((e:any)=>!e.before||e.before.raw_text!==e.text||e.before.sort_order!==e.sort_order);
   for(const chunk of jsonChunks(written.map((e:any)=>({id:e.id,text:e.text,version:e.version,sort_order:e.sort_order}))))tx.statements.push(stmt(env.DB,`INSERT INTO log_lines(id,workspace_id,case_id,sort_order,raw_text,version,created_at,updated_at,deleted_at,source_operation_id)
@@ -333,5 +339,6 @@ async function saveNotesAttempt(env:Env,p:Principal,a:Args) {
   for(const e of entries)if(!e.before||e.before.raw_text!==e.text||e.before.sort_order!==e.sort_order)
     diffs.push({line_id:e.id,before:e.before??null,after:{text:e.text,version:e.version,sort_order:e.sort_order}});
   auditDiffs(env,p,tx,c.id,diffs);
-  bump(env,tx,c.id);return finish(env,p,tx,c.id,{changed:diffs.length,lines:entries.map((e:any)=>({line_id:e.id,version:e.version}))});
+  if(bodyChanged||!a.metadata)bump(env,tx,c.id);
+  return finish(env,p,tx,c.id,{changed:diffs.length,lines:entries.map((e:any)=>({line_id:e.id,version:e.version}))});
 }

@@ -28,6 +28,11 @@ const resultType = z.enum(['all','cases','lines']);
 const lineVersion = version.describe('目标行当前 version');
 const metadataFields = z.object(fields).strict().refine(x=>Object.keys(x).length>0,'至少修改一个元数据字段')
   .describe('只修改传入字段；省略保留，可空字段用 null 清空');
+export const webNotesSchema=z.object({case_ref:ref,expected_document_revision:version,
+  lines:z.array(z.object({line_id:z.string().optional(),text:z.string().max(16_384)}).strict()).max(5000),
+  metadata:z.object({expected_metadata_version:version,fields:metadataFields}).strict().optional()
+    .describe('同次保存的元数据变更；与正文、版本、审计及回执原子提交，归档笔记仅允许原文保持不变'),
+  request_key:key}).strict();
 export const schemas = {
   search: z.object({ query: z.string().max(500).optional(), case_ref: ref.optional(), kind: fields.kind,
     status: status.optional(), scope,
@@ -170,6 +175,8 @@ export const instructions = `# 案记
 每次写入使用唯一 request_key，不能用 MCP 请求 ID 代替；${retryWrite}，同键不同参数冲突，修改意图或参数后用新键。版本冲突先重新读取并核对原文、元数据及版本，再提交。失败按 error.code、retryable、commit_state、next_action 处理；解析问题核对 diagnostics 后再改，不猜日期。
 
 元数据更新回执中的 case 是提交时的完整元数据；回执不含正文时，不能将已有正文视为回执中较新 document_revision 的内容。
+
+同次保存原文与元数据时，两类版本保护、原文、索引、元数据、审计和回执必须一并提交或一并拒绝；归档笔记原文保持不变。
 
 读取按任务指定 case_ref、scope、日期或类型，避免为追加一段笔记先读取全库；已知完整案名或 ID 时可直接追加。只查案件用 result_type=cases，需要全部案件时可设 limit=500。同一任务中复用已读取的结果，需核对新修改或出现版本冲突时再读。DAILY_LIMIT_EXCEEDED 时停止即时重试，等待 details.resets_at 后继续；提交状态不明的写入仍用原键和原参数核对。
 

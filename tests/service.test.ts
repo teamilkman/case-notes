@@ -409,6 +409,56 @@ test('note receipt contains committed recent activity and replays the same case 
   assert.equal(replay.data.replayed,true);assert.deepEqual(replay.data.case,saved.data.case);
 });
 
+test('combined document save commits metadata, original rows, index, audit and immutable receipt together',async()=>{
+  const cid=await create('统一编辑原子合成案');await call('lines_add',{case_ref:cid,text:'原行\n\n重复\n重复',request_key:key()});
+  const before=await lines(cid),args={case_ref:cid,expected_document_revision:before.document_revision,
+    metadata:{expected_metadata_version:before.case.metadata_version,fields:{name:'统一修改名称',court:'合成法院',status:'结案'}},
+    lines:before.lines.map((l:any,n:number)=>({line_id:l.line_id,text:n===0?'2026.11.05 同时修改正文':l.text})),request_key:key()};
+  const saved:any=await saveNotes(env,web,args),after=await lines(cid);
+  assert.equal(after.case.name,'统一修改名称');assert.equal(after.case.status,'结案');assert.equal(after.case.court,'合成法院');assert.equal(after.case.recent_activity,'2026-11-05');
+  assert.equal(after.document_revision,before.document_revision+1);assert.equal(after.case.metadata_version,before.case.metadata_version+1);
+  assert.deepEqual(after.lines.slice(1),before.lines.slice(1));assert.deepEqual(after.lines.map((l:any)=>l.line_id),before.lines.map((l:any)=>l.line_id));
+  assert.deepEqual(saved.data.case,after.case);
+  const audits=await env.DB.prepare('SELECT line_id,action FROM audit_changes WHERE operation_id=?').bind(saved.data.operation_id).all<any>();
+  assert.ok(audits.results.some(r=>r.line_id===null));assert.ok(audits.results.some(r=>r.line_id===before.lines[0].line_id));assert.ok(audits.results.every(r=>r.action==='web_save_notes'));
+  const replay:any=await saveNotes(env,web,args);assert.equal(replay.data.replayed,true);assert.deepEqual(replay.data.lines,saved.data.lines);assert.deepEqual(replay.data.case,saved.data.case);
+});
+
+test('a conflict on either document or metadata rejects the entire combined save without audits or partial changes',async()=>{
+  for(const field of ['document','metadata']){
+    const cid=await create('统一冲突合成案'+field);await call('lines_add',{case_ref:cid,text:'保留原文',request_key:key()});const base=await lines(cid);
+    if(field==='document')await call('lines_add',{case_ref:cid,text:'并发追加',request_key:key()});
+    else await call('cases_update',{case_ref:cid,expected_metadata_version:base.case.metadata_version,fields:{court:'并发法院'},request_key:key()});
+    const before=await lines(cid),request_key=key();
+    await assert.rejects(saveNotes(env,web,{case_ref:cid,expected_document_revision:base.document_revision,
+      metadata:{expected_metadata_version:base.case.metadata_version,fields:{name:'不能部分保存'}},
+      lines:base.lines.map((l:any)=>({line_id:l.line_id,text:'不能部分覆盖'})),request_key}),(e:AppError)=>e.code==='VERSION_CONFLICT');
+    assert.deepEqual(await lines(cid),before);assert.equal(await env.DB.prepare('SELECT COUNT(*) AS n FROM operations WHERE request_key=?').bind(request_key).first('n'),0);
+  }
+});
+
+test('metadata-only saves preserve document revision and exact archived rows; restoration never bypasses body read-only',async()=>{
+  const cid=await create('归档统一编辑合成案');await call('lines_add',{case_ref:cid,text:'  保留  \n\n重复\n重复',request_key:key()});
+  await call('cases_update',{case_ref:cid,expected_metadata_version:1,fields:{status:'结案'},request_key:key()});const before=await lines(cid);
+  const args={case_ref:cid,expected_document_revision:before.document_revision,lines:before.lines.map((l:any)=>({line_id:l.line_id,text:l.text})),
+    metadata:{expected_metadata_version:before.case.metadata_version,fields:{name:'归档改名',court:null}},request_key:key()};
+  await saveNotes(env,web,args);const after=await lines(cid);assert.deepEqual(after.lines,before.lines);assert.equal(after.document_revision,before.document_revision);assert.equal(after.case.name,'归档改名');
+  await assert.rejects(saveNotes(env,web,{...args,metadata:{expected_metadata_version:after.case.metadata_version,fields:{status:'在办'}},
+    lines:after.lines.map((l:any,n:number)=>({line_id:l.line_id,text:n===0?'禁止修改':l.text})),request_key:key()}),(e:AppError)=>e.code==='CASE_READ_ONLY');
+  assert.deepEqual(await lines(cid),after);
+  await saveNotes(env,web,{...args,metadata:{expected_metadata_version:after.case.metadata_version,fields:{status:'在办'}},request_key:key()});
+  assert.equal((await lines(cid)).case.status,'在办');assert.deepEqual((await lines(cid)).lines,before.lines);
+});
+
+test('concurrent metadata update and combined save have one version winner and cannot commit half the combined operation',async()=>{
+  const cid=await create('统一并发合成案');await call('lines_add',{case_ref:cid,text:'并发原文',request_key:key()});const doc=await lines(cid);
+  const results=await Promise.allSettled([
+    saveNotes(env,web,{case_ref:cid,expected_document_revision:doc.document_revision,metadata:{expected_metadata_version:1,fields:{name:'统一保存赢家'}},lines:doc.lines.map((l:any)=>({line_id:l.line_id,text:'统一正文赢家'})),request_key:key()}),
+    call('cases_update',{case_ref:cid,expected_metadata_version:1,fields:{name:'元数据赢家'},request_key:key()})]);
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((results.find(r=>r.status==='rejected') as PromiseRejectedResult).reason.code,'VERSION_CONFLICT');
+  const current=await lines(cid);assert.equal(current.lines[0].text,current.case.name==='统一保存赢家'?'统一正文赢家':'并发原文');
+});
+
 test('large concurrent note saves return version conflicts without exceeding bind limits',async()=>{
   const cid=await create('大笔记竞争案');await call('lines_add',{case_ref:cid,text:Array.from({length:120},(_,n)=>'记录'+n).join('\n'),request_key:key()});
   const doc=await lines(cid);

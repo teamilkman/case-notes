@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {legacyView,save,createCase,pendingCreate,updateCase,pendingMetadata,complete,feed,invalidateReads,beginEdit,changeEdit,restoreDraft,logout} from '../public/db-adapter.js';
+import {legacyView,save,createCase,pendingCreate,updateCase,pendingMetadata,changeMetadata,complete,feed,invalidateReads,beginEdit,changeEdit,restoreDraft,logout} from '../public/db-adapter.js';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {parseLine} from '../src/parser';
@@ -195,38 +195,48 @@ function metadataHarness(){
   const ui=uiHarness(),c={id:'meta-case',name:'原案件',kind:'case',status:'结案',cause:'原案由',case_number:null,court:'原法院',opened_date:'2026-10-01',aliases:['保留别名'],metadata_version:2,document_revision:1};
   const doc={ref:c.id,case:c,revision:1,text:'原文\n\n重复\n重复',lines:[{line_id:'l',text:'原文'},{line_id:'blank',text:''},{line_id:'a',text:'重复'},{line_id:'b',text:'重复'}]};
   ui.state.connection={offline:false};ui.state.view='cases';ui.state.selCase=c.id;
-  ui.context.DB.pendingMetadata=()=>null;ui.context.DB.invalidateCase=()=>{};
-  const view:any={...ui.components['cases-view'].methods,$state:ui.state,$refs:{},$nextTick:async(fn:any)=>fn?.(),dbDoc:doc,mdSeq:0,docChange:0,metaDlg:false};
+  ui.context.DB.beginEdit=beginEdit;ui.context.DB.restoreDraft=(e:any)=>e.text;ui.context.DB.invalidateCase=()=>{};ui.context.DB.discardDraft=()=>{};
+  ui.context.DB.changeMetadata=(e:any,m:any)=>{e.metadata=m;};
+  const view:any={...ui.components['cases-view'].methods,$state:ui.state,$refs:{},$nextTick:async(fn:any)=>fn?.(),dbDoc:doc,mdText:doc.text,mdSeq:0,docChange:0,metaForm:{}};
   return {...ui,view,doc};
 }
 
 test('metadata edits send only changed fields, clear nullable values and keep the original body and draft',async()=>{
   const {view,doc,context,state}=metadataHarness();let sent:any,primed:any,invalidated:any;
-  context.DB.updateCase=async(ref:any,version:any,fields:any)=>{sent={ref,version,fields};return {case_name:fields.name,document_revision:1,metadata_version:3,case:{...doc.case,...fields,metadata_version:3}};};
+  context.DB.save=async(e:any)=>{sent=e.metadata;return {document_revision:1,metadata_version:3,case:{...doc.case,...e.metadata.fields,metadata_version:3},lines:doc.lines.map(l=>({line_id:l.line_id,version:1}))};};
   context.DB.rememberDoc=(d:any)=>{primed=d;};context.DB.invalidateReads=(d:any)=>{invalidated=d;};
-  await view.openMetadata();assert.equal(view.metaDlg,true);view.metaForm.name='新案名';view.metaForm.court='';
-  await view.submitMetadata();
-  assert.deepEqual(JSON.parse(JSON.stringify(sent)),{ref:'meta-case',version:2,fields:{name:'新案名',court:null}});
-  assert.equal(view.metaDlg,false);assert.equal(primed.lines,doc.lines);assert.equal(primed.text,doc.text);assert.equal(primed.revision,1);
+  await view.enterEdit();assert.equal(view.editing,true);view.metaForm.name='新案名';view.metaForm.court='';
+  await view.saveEdit();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)),{expected_metadata_version:2,fields:{name:'新案名',court:null}});
+  assert.equal(view.editing,false);assert.deepEqual(primed.lines.map((l:any)=>l.text),doc.lines.map(l=>l.text));assert.equal(primed.text,doc.text);assert.equal(primed.revision,1);
   assert.deepEqual(primed.case.aliases,['保留别名']);assert.equal(invalidated.previousCase,doc.case);assert.equal(state.D.归档[0].名称,'新案名');
 });
 
-test('a metadata receipt with a newer body revision forces a read instead of relabeling old text',async()=>{
-  const {view,doc,context}=metadataHarness();let reads=0,primes=0;
-  context.DB.updateCase=async()=>({document_revision:2,metadata_version:3,case:{...doc.case,name:'新名称',metadata_version:3,document_revision:2}});
-  context.DB.rememberDoc=()=>{primes++;};view.loadMd=async()=>{reads++;};
-  await view.openMetadata();view.metaForm.name='新名称';await view.submitMetadata();
-  assert.equal(primes,0);assert.equal(reads,1);assert.equal(view.dbDoc,null);assert.equal(doc.revision,1);
+test('one edit entry initializes both metadata and body, and unchanged values do not write',async()=>{
+  const {view,doc,context,components}=metadataHarness();let writes=0;
+  context.DB.save=async()=>{writes++;};await view.enterEdit();
+  assert.equal(view.metaForm.name,doc.case.name);assert.equal(view.editText,doc.text);
+  assert.equal(components['cases-view'].computed.canEditBody.call(view),false);
+  await view.saveEdit();assert.equal(writes,0);assert.equal(view.editing,false);
 });
 
-test('metadata conflicts keep user input and the old base until explicit reload; back exits inline edit first',async()=>{
+test('combined conflicts keep both inputs and their original versions; back keeps the draft before leaving the detail',async()=>{
   const {view,doc,context,state}=metadataHarness();let calls=0;
-  context.DB.updateCase=async()=>{calls++;throw Object.assign(new Error('冲突'),{code:'VERSION_CONFLICT'});};
-  await view.openMetadata();view.metaForm.name='用户输入';await view.submitMetadata();await view.submitMetadata();
-  assert.equal(calls,1);assert.equal(view.metaForm.name,'用户输入');assert.equal(view.metaDoc.case.metadata_version,2);assert.equal(view.metaConflict,true);
-  view.loadMd=async()=>{view.dbDoc={...doc,case:{...doc.case,name:'服务器名称',metadata_version:3}};};
-  await view.openMetadata(true);assert.equal(view.metaForm.name,'服务器名称');assert.equal(view.metaConflict,false);
-  const nav=createNavigation(state,()=>view);assert.equal(nav.back(),true);assert.equal(view.metaDlg,false);assert.equal(state.selCase,doc.ref);
+  context.DB.save=async()=>{calls++;throw Object.assign(new Error('冲突'),{code:'VERSION_CONFLICT'});};
+  await view.enterEdit();view.metaForm.name='用户输入';view.editText='正文草稿';await view.saveEdit();await view.saveEdit();
+  assert.equal(calls,1);assert.equal(view.metaForm.name,'用户输入');assert.equal(view.dbEditor.metadata.expected_metadata_version,2);assert.equal(view.editConflict,true);assert.equal(view.editText,'正文草稿');
+  const nav=createNavigation(state,()=>view);assert.equal(nav.back(),true);assert.equal(view.editing,false);assert.equal(state.selCase,doc.ref);
+});
+
+test('combined drafts retain metadata and body versions after reload and replay the exact uncertain save',async()=>{
+  const previous={storage:globalThis.sessionStorage,fetch:globalThis.fetch,confirm:globalThis.confirm};globalThis.sessionStorage=storage();globalThis.confirm=()=>true;
+  const sent:any[]=[];globalThis.fetch=async(_path,options)=>{sent.push(JSON.parse(String(options?.body)));return sent.length===1?new Response('{'):Response.json({ok:true,data:{replayed:true}});};
+  try{
+    const editor=beginEdit(documentFor(1));changeMetadata(editor,{expected_metadata_version:2,fields:{name:'资料草稿',court:null}});changeEdit(editor,'正文草稿');
+    await assert.rejects(save(editor));const restored=beginEdit(documentFor(5));restoreDraft(restored);
+    assert.equal(restored.revision,1);assert.equal(restored.metadata?.expected_metadata_version,2);assert.equal(restored.metadata?.fields.name,'资料草稿');
+    assert.equal((await save(restored)).replayed,true);assert.deepEqual(sent[1],sent[0]);assert.equal(sessionStorage.getItem('case-notes:draft:draft-case'),null);
+  }finally{globalThis.sessionStorage=previous.storage;globalThis.fetch=previous.fetch;globalThis.confirm=previous.confirm;}
 });
 
 test('case back returns to its explicit source, then the dashboard, without replaying month or browser history',()=>{
@@ -634,7 +644,7 @@ test('collapsed recent activity shows both stats counts without reading records 
 test('all editor actions are guarded while a receipt is pending, and the submitted text becomes the saved preview',async()=>{
   const {components,context}=uiHarness();let release:(r:any)=>void=()=>{};
   context.DB.save=()=>new Promise(resolve=>{release=resolve;});
-  const view:any={$state:{selCase:'c',change:0},editError:'',dbDoc:{ref:'c',case:{id:'c',name:'案',status:'在办'},text:'旧文'},
+  const view:any={$state:{selCase:'c',change:0,connection:{offline:false}},metaForm:{name:'案'},updateMetadata:()=>{},editError:'',dbDoc:{ref:'c',case:{id:'c',name:'案',status:'在办'},text:'旧文'},
     dbEditor:{rows:[{line_id:'l',text:'新文'}]},editText:'新文',editing:true,saving:false,$refs:{},$nextTick:()=>{}};
   const methods=components['cases-view'].methods,pending=methods.saveEdit.call(view);
   for(const action of ['insertTodo','openDlg','dlgOk','insertNextLine','cancelEdit','backToList'])methods[action].call(view,'新日程');
