@@ -198,13 +198,14 @@ async function addEntries(env:Env,p:Principal,tx:Tx,cid:string,entries:any[],bef
   tx.statements.push(...indexStatements(env.DB,entries)); auditNewLines(env,p,tx,cid,entries);
 }
 async function finish(env:Env,p:Principal,tx:Tx,cid:string,data:Args) {
+  const includeCase=tx.action==='web_save_notes'||tx.action==='cases_update';
   const receipt=success({operation_id:tx.operationId,request_key:tx.key,case_id:cid,replayed:false,...data});
   const stored=await storeReceipt(receipt);
   tx.statements.push(stmt(env.DB,`UPDATE operations SET result_json=json_set(?,
     '$.data.case_name',(SELECT name FROM cases WHERE id=?),
     '$.data.metadata_version',(SELECT metadata_version FROM cases WHERE id=?),
-    '$.data.document_revision',(SELECT document_revision FROM cases WHERE id=?)${tx.action==='web_save_notes'?`,
-    '$.data.case',json((SELECT ${caseJson} FROM cases c WHERE c.id=?))`:''}) WHERE id=?`,[stored,cid,cid,cid,...(tx.action==='web_save_notes'?[cid]:[]),tx.operationId]));
+    '$.data.document_revision',(SELECT document_revision FROM cases WHERE id=?)${includeCase?`,
+    '$.data.case',json((SELECT ${caseJson} FROM cases c WHERE c.id=?))`:''}) WHERE id=?`,[stored,cid,cid,cid,...(includeCase?[cid]:[]),tx.operationId]));
   tx.statements.push(stmt(env.DB,'DELETE FROM write_guards WHERE operation_id=?',[tx.operationId]));
   tx.statements.push(stmt(env.DB,'SELECT result_json FROM operations WHERE id=?',[tx.operationId]));
   try {

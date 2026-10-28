@@ -177,6 +177,12 @@ export function invalidateReads(savedDoc,persist=true){
       // Keep this browsing result stable even when recent activity changes its
       // sort position or a text match disappears. New queries read current data.
       const item=value.items.find(c=>c.id===savedDoc.ref);
+      const group=c=>c.kind==='affair'?'affairs':c.status==='在办'?'active':'archived';
+      const from=savedDoc.previousCase&&group(savedDoc.previousCase),to=group(savedDoc.case);
+      if(from&&from!==to&&(value.args.group===from||value.args.group===to)){
+        if(item&&value.args.group===from){value.items.splice(value.items.indexOf(item),1);if(value.total!==null)value.total=Math.max(0,value.total-1);}
+        continue; // Changed membership must revalidate both groups on demand.
+      }
       if(item){
         Object.assign(item,savedDoc.case);
         if(value.args.query)item.match_text=savedDoc.lines.find(l=>l.text.toLowerCase().includes(value.args.query.toLowerCase()))?.text||null;
@@ -265,6 +271,18 @@ export function pendingCreate(){
   migrateSessionStorage();
   try{return JSON.parse(sessionStorage.getItem('case-notes:pending:create:new'))?.args||null;}catch{return null;}
 }
+export function pendingMetadata(ref){
+  migrateSessionStorage();
+  try{return JSON.parse(sessionStorage.getItem('case-notes:pending:metadata:'+ref))?.args||null;}catch{return null;}
+}
+export async function updateCase(ref,version,fields){
+  await ensureOnline();
+  const original=pendingMetadata(ref);
+  const base=original?Object.fromEntries(Object.entries(original).filter(([k])=>k!=='request_key')):{case_ref:ref,expected_metadata_version:version,fields};
+  const job=pending('metadata',ref,base);
+  try{const receipt=await api('cases_update',job.args);job.clear();return receipt;}
+  catch(e){if(!e.retryable&&e.commitState!=='unknown')job.clear();throw e;}
+}
 export async function createCase(fields){
   await ensureOnline();
   const original=pendingCreate();
@@ -296,4 +314,4 @@ function sanitize(html){
   }
   return doc.body.innerHTML;
 }
-if(typeof window!=='undefined')window.DB={connection,reconnect,resume,web,pager,peek:peekPage,feed,calendar,readCalendar,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,save,createCase,pendingCreate,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};
+if(typeof window!=='undefined')window.DB={connection,reconnect,resume,web,pager,peek:peekPage,feed,calendar,readCalendar,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,save,createCase,pendingCreate,updateCase,pendingMetadata,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};

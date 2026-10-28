@@ -14,6 +14,7 @@ export function createNavigation(state,viewFor){
     back(){
       const view=viewFor(state.view);
       if(view?.saving)return true;
+      if(view?.metaDlg){view.closeMetadata();return true;}
       if(view?.createDlg){view.closeCreate();return true;}
       if(view?.dlg){view.dlg=false;return true;}
       if(view?.monthPickerOpen){view.closeMonthPicker();return true;}

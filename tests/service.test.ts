@@ -585,6 +585,18 @@ test('metadata handles archive/restore, original lines unchanged, archived searc
   const search:any=await call('search',{query:'法官电话123'});assert.ok(search.data.items.some((item:any)=>item.type==='line'&&item.line.case_id===cid));
   await call('cases_update',{case_ref:cid,expected_metadata_version:2,fields:{status:'在办'},request_key:key()});assert.equal((await lines(cid)).lines.length,2);
 });
+
+test('metadata receipt captures committed fields and recent activity, replays unchanged and never touches note rows',async()=>{
+  const cid=await create('元数据回执合成案');await call('lines_add',{case_ref:cid,text:'原文\n\n重复\n重复',request_key:key()});
+  const before=await lines(cid),args={case_ref:cid,expected_metadata_version:1,fields:{name:'修改名称',court:'合成法院',opened_date:'2026-11-02'},request_key:key()};
+  const result:any=await call('cases_update',args),after=await lines(cid);
+  assert.deepEqual(result.data.case,after.case);assert.equal(result.data.case.recent_activity,'2026-11-02');
+  assert.deepEqual(after.lines,before.lines);assert.equal(after.document_revision,before.document_revision);
+  await call('cases_update',{case_ref:cid,expected_metadata_version:2,fields:{court:null,status:'结案'},request_key:key()});
+  const replay:any=await call('cases_update',args);assert.equal(replay.data.replayed,true);assert.deepEqual(replay.data.case,result.data.case);
+  const stable=await lines(cid);await assert.rejects(call('cases_update',{...args,request_key:key()}),(e:AppError)=>e.code==='VERSION_CONFLICT');
+  assert.deepEqual(await lines(cid),stable);
+});
 test('read-only pages reject later edits and other principals; workspace changes invalidate global lists',async()=>{
   const cid=await create('分页案');await call('lines_add',{case_ref:cid,text:'2026.10.10 第一行\n2026.10.10 第二行\n2026.10.10 第三行',request_key:key()});
   const first:any=await call('search',{case_ref:cid,limit:1});assert.equal(first.data.has_more,true);

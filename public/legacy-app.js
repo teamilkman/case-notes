@@ -160,7 +160,7 @@ const app = createApp({
     D(){ return this.$state.D; },
     futureCount(){return this.$state.counts.future??'-';},
     monthCount(){return this.$state.counts.month??'-';},
-    swipeLocked(){const view=viewControllers[this.$state.view];return !!(viewControllers.cases?.saving||view?.editing||view?.dlg||view?.createDlg||view?.monthPickerOpen);},
+    swipeLocked(){const view=viewControllers[this.$state.view];return !!(viewControllers.cases?.saving||view?.editing||view?.dlg||view?.createDlg||view?.metaDlg||view?.monthPickerOpen);},
   },
   methods:{
     loadStats,
@@ -265,7 +265,7 @@ app.component('page-tail',{
 app.component('cases-view', {
   props:{active:{default:true}},
   template:'#cases-tpl',
-  data(){ return {feed:DB.feed('cases',{group:'active',query:''}),seenChange:this.$state.change,docChange:-1, group:'在办', editing:false,editPane:'write', editText:'', saving:false, mdText:'', mdLoading:true, mdErr:false, mdSeq:0, dlg:false, dlgPos:0, dlgDate:'', dlgTime:'', dlgText:'', dbDoc:null, dbEditor:null, editError:'',closingCase:null,createDlg:false,createName:'',createKind:'case',createError:'',createPending:false }; },
+  data(){ return {feed:DB.feed('cases',{group:'active',query:''}),seenChange:this.$state.change,docChange:-1, group:'在办', editing:false,editPane:'write', editText:'', saving:false, mdText:'', mdLoading:true, mdErr:false, mdSeq:0, dlg:false, dlgPos:0, dlgDate:'', dlgTime:'', dlgText:'', dbDoc:null, dbEditor:null, editError:'',closingCase:null,createDlg:false,createName:'',createKind:'case',createError:'',createPending:false,metaDlg:false,metaForm:{},metaDoc:null,metaError:'',metaPending:false,metaConflict:false }; },
   computed:{
     D(){ return this.$state.D; },
     selCase(){ return this.$state.selCase; },
@@ -281,7 +281,7 @@ app.component('cases-view', {
   },
   watch:{
     active(value){if(value)this.refresh();},
-    selCase(){this.mdSeq++;this.editing=false;if(this.selCase||!this.closingCase){this.closingCase=null;this.loadMd();}},
+    selCase(){this.mdSeq++;this.editing=false;this.metaDlg=false;if(this.selCase||!this.closingCase){this.closingCase=null;this.loadMd();}},
     group(){this.loadList();},
     dlg(open){this.$nextTick(()=>{if(open)this.$refs.dialogDate?.focus();else this.$refs.editor?.focus({preventScroll:true});});},
     '$state.casesSearch'(){this.loadList();},
@@ -291,6 +291,48 @@ app.component('cases-view', {
   deactivated(){this.closingCase=null;},
   unmounted(){this.mdSeq++;},
   methods:{
+    metadataValues(c){return {name:c.name,status:c.status,cause:c.cause??'',case_number:c.case_number??'',court:c.court??'',opened_date:c.opened_date??''};},
+    async openMetadata(reload=false){
+      if(this.saving||this.editing||this.$state.connection.offline)return;
+      if(reload){DB.invalidateCase(this.$state.selCase);await this.loadMd();}
+      if(this.mdLoading||!this.dbDoc||this.dbDoc.ref!==this.$state.selCase||this.mdErr)return;
+      const pending=DB.pendingMetadata(this.dbDoc.ref);
+      this.metaDoc=this.dbDoc;this.metaForm=this.metadataValues({...this.dbDoc.case,...pending?.fields});
+      this.metaPending=!!pending;this.metaConflict=false;this.metaError='';
+      this.metaDlg=true;this.$nextTick(()=>this.$refs.metaName?.focus());
+    },
+    closeMetadata(){if(this.saving)return;this.metaDlg=false;this.$nextTick(()=>this.$refs.metadataTrigger?.focus({preventScroll:true}));},
+    async submitMetadata(){
+      if(this.saving||this.metaConflict||this.$state.connection.offline)return;
+      if(!this.metaForm.name.trim()){this.metaError='请输入名称';this.$refs.metaName?.focus();return;}
+      const doc=this.metaDoc,base=this.metadataValues(doc.case),fields={};
+      for(const [key,value]of Object.entries(this.metaForm)){
+        if(value===base[key])continue;
+        fields[key]=['cause','case_number','court','opened_date'].includes(key)?value||null:value;
+      }
+      if(!this.metaPending&&!Object.keys(fields).length){this.closeMetadata();toast('资料未改动','ok');return;}
+      this.saving=true;this.metaError='';this.mdSeq++;this.mdLoading=false;
+      let receipt;
+      try{receipt=await DB.updateCase(doc.ref,doc.case.metadata_version,fields);}
+      catch(e){
+        this.metaPending=!!DB.pendingMetadata(doc.ref);
+        this.metaConflict=e.code==='VERSION_CONFLICT';
+        this.metaError=this.metaConflict?'服务器资料已更新，本次未保存。请先复制需要保留的输入，再重新载入最新信息。':e.message;
+        if(this.metaConflict){DB.invalidateCase(doc.ref);this.docChange=-1;}
+        return;
+      }finally{this.saving=false;}
+      this.metaDlg=false;this.metaPending=false;
+      // A metadata receipt can include a newer body revision from another writer.
+      // Keep the old text's own revision until the complete document is reread.
+      const c=receipt.case||{...doc.case,...receipt.fields,name:receipt.case_name,metadata_version:receipt.metadata_version,document_revision:receipt.document_revision};
+      const savedDoc={...doc,case:c,previousCase:doc.case},needsRead=!receipt.case||receipt.replayed||receipt.document_revision!==doc.revision;
+      toast('案件资料已保存','ok');changed(savedDoc);rememberCase(c);this.seenChange=this.$state.change;
+      if(this.$state.selCase===doc.ref){this.dbDoc=needsRead?null:savedDoc;this.docChange=needsRead?-1:this.$state.change;}
+      if(needsRead){if(this.$state.selCase===doc.ref)void this.loadMd(true);}
+      else DB.rememberDoc(savedDoc);
+      if(doc.case.status!==c.status||doc.case.kind!==c.kind)this.loadList();
+      this.$nextTick(()=>this.$refs.metadataTrigger?.focus({preventScroll:true}));
+    },
     openCreate(){
       if(this.saving||this.$state.connection.offline)return;
       const pending=DB.pendingCreate();

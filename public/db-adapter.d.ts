@@ -8,6 +8,8 @@ export function restoreDraft(editor:NoteEditor):string;
 export function save(editor:NoteEditor):Promise<any>;
 export function createCase(fields:{name:string;kind:'case'|'affair'}):Promise<any>;
 export function pendingCreate():{name:string;kind:'case'|'affair';request_key:string}|null;
+export function updateCase(ref:string,version:number,fields:Record<string,unknown>):Promise<any>;
+export function pendingMetadata(ref:string):{case_ref:string;expected_metadata_version:number;fields:Record<string,unknown>;request_key:string}|null;
 export function logout():Promise<void>;
 export function complete(todo:any):Promise<any>;
 export function feed(name:string,args?:Record<string,any>):any;

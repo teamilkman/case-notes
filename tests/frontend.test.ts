@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {legacyView,save,createCase,pendingCreate,complete,feed,invalidateReads,beginEdit,changeEdit,restoreDraft,logout} from '../public/db-adapter.js';
+import {legacyView,save,createCase,pendingCreate,updateCase,pendingMetadata,complete,feed,invalidateReads,beginEdit,changeEdit,restoreDraft,logout} from '../public/db-adapter.js';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {parseLine} from '../src/parser';
@@ -176,6 +176,58 @@ function uiHarness(){
 }
 
 const flushUi=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
+
+test('metadata retries preserve the original version and fields across reload, then clear a known conflict',async()=>{
+  const previous={storage:globalThis.sessionStorage,fetch:globalThis.fetch};globalThis.sessionStorage=storage();const sent:any[]=[];
+  globalThis.fetch=async(path,options)=>{
+    assert.equal(path,'/api/v1/cases_update');sent.push(JSON.parse(String(options?.body)));
+    return sent.length===1?new Response('{'):Response.json({ok:false,error:{code:'VERSION_CONFLICT',message:'版本冲突',commit_state:'not_committed'}},{status:409});
+  };
+  try{
+    await assert.rejects(updateCase('meta-case',2,{court:null,name:'原请求'}));
+    assert.equal(pendingMetadata('meta-case')?.expected_metadata_version,2);
+    await assert.rejects(updateCase('meta-case',8,{name:'不能替换未知结果'}),(e:any)=>e.code==='VERSION_CONFLICT');
+    assert.deepEqual(sent[1],sent[0]);assert.equal(pendingMetadata('meta-case'),null);
+  }finally{globalThis.sessionStorage=previous.storage;globalThis.fetch=previous.fetch;}
+});
+
+function metadataHarness(){
+  const ui=uiHarness(),c={id:'meta-case',name:'原案件',kind:'case',status:'结案',cause:'原案由',case_number:null,court:'原法院',opened_date:'2026-10-01',aliases:['保留别名'],metadata_version:2,document_revision:1};
+  const doc={ref:c.id,case:c,revision:1,text:'原文\n\n重复\n重复',lines:[{line_id:'l',text:'原文'},{line_id:'blank',text:''},{line_id:'a',text:'重复'},{line_id:'b',text:'重复'}]};
+  ui.state.connection={offline:false};ui.state.view='cases';ui.state.selCase=c.id;
+  ui.context.DB.pendingMetadata=()=>null;ui.context.DB.invalidateCase=()=>{};
+  const view:any={...ui.components['cases-view'].methods,$state:ui.state,$refs:{},$nextTick:async(fn:any)=>fn?.(),dbDoc:doc,mdSeq:0,docChange:0,metaDlg:false};
+  return {...ui,view,doc};
+}
+
+test('metadata edits send only changed fields, clear nullable values and keep the original body and draft',async()=>{
+  const {view,doc,context,state}=metadataHarness();let sent:any,primed:any,invalidated:any;
+  context.DB.updateCase=async(ref:any,version:any,fields:any)=>{sent={ref,version,fields};return {case_name:fields.name,document_revision:1,metadata_version:3,case:{...doc.case,...fields,metadata_version:3}};};
+  context.DB.rememberDoc=(d:any)=>{primed=d;};context.DB.invalidateReads=(d:any)=>{invalidated=d;};
+  await view.openMetadata();assert.equal(view.metaDlg,true);view.metaForm.name='新案名';view.metaForm.court='';
+  await view.submitMetadata();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)),{ref:'meta-case',version:2,fields:{name:'新案名',court:null}});
+  assert.equal(view.metaDlg,false);assert.equal(primed.lines,doc.lines);assert.equal(primed.text,doc.text);assert.equal(primed.revision,1);
+  assert.deepEqual(primed.case.aliases,['保留别名']);assert.equal(invalidated.previousCase,doc.case);assert.equal(state.D.归档[0].名称,'新案名');
+});
+
+test('a metadata receipt with a newer body revision forces a read instead of relabeling old text',async()=>{
+  const {view,doc,context}=metadataHarness();let reads=0,primes=0;
+  context.DB.updateCase=async()=>({document_revision:2,metadata_version:3,case:{...doc.case,name:'新名称',metadata_version:3,document_revision:2}});
+  context.DB.rememberDoc=()=>{primes++;};view.loadMd=async()=>{reads++;};
+  await view.openMetadata();view.metaForm.name='新名称';await view.submitMetadata();
+  assert.equal(primes,0);assert.equal(reads,1);assert.equal(view.dbDoc,null);assert.equal(doc.revision,1);
+});
+
+test('metadata conflicts keep user input and the old base until explicit reload; back exits inline edit first',async()=>{
+  const {view,doc,context,state}=metadataHarness();let calls=0;
+  context.DB.updateCase=async()=>{calls++;throw Object.assign(new Error('冲突'),{code:'VERSION_CONFLICT'});};
+  await view.openMetadata();view.metaForm.name='用户输入';await view.submitMetadata();await view.submitMetadata();
+  assert.equal(calls,1);assert.equal(view.metaForm.name,'用户输入');assert.equal(view.metaDoc.case.metadata_version,2);assert.equal(view.metaConflict,true);
+  view.loadMd=async()=>{view.dbDoc={...doc,case:{...doc.case,name:'服务器名称',metadata_version:3}};};
+  await view.openMetadata(true);assert.equal(view.metaForm.name,'服务器名称');assert.equal(view.metaConflict,false);
+  const nav=createNavigation(state,()=>view);assert.equal(nav.back(),true);assert.equal(view.metaDlg,false);assert.equal(state.selCase,doc.ref);
+});
 
 test('case back returns to its explicit source, then the dashboard, without replaying month or browser history',()=>{
   for(const parent of ['kanban','calendar','cases']){
@@ -641,6 +693,22 @@ test('a case next-page response from before save cannot overwrite the updated ro
     assert.equal(list.items,rows);assert.deepEqual(list.items.map((c:any)=>c.id),['save-race']);
     assert.equal(rows[0].document_revision,2);assert.equal(list.cursor,'next');assert.equal(list.loading,false);
   }finally{globalThis.fetch=fetchBefore;invalidateReads();}
+});
+
+test('metadata archival removes the old membership immediately and refreshes both case groups on demand',async()=>{
+  const previous=globalThis.fetch;let archived=false;invalidateReads();
+  const before={id:'meta-group-case',name:'合成归档案件',kind:'case',status:'在办'},after={...before,status:'结案'};
+  globalThis.fetch=async(_path,options)=>{
+    const args=JSON.parse(String(options?.body)),items=(args.group==='archived')===archived?[archived?after:before]:[];
+    return Response.json({ok:true,data:{items,matched_count:items.length,has_more:false,next_cursor:null}});
+  };
+  try{
+    const active=feed('cases',{group:'active',query:'元信息分组验证'}),closed=feed('cases',{group:'archived',query:'元信息分组验证'});
+    await active.ensure();await closed.ensure();assert.equal(active.items.length,1);assert.equal(closed.items.length,0);
+    archived=true;invalidateReads({ref:before.id,previousCase:before,case:after,lines:[]});
+    assert.equal(active.items.length,0);assert.equal(active.total,0);
+    await closed.ensure();await active.ensure();assert.equal(closed.items[0].status,'结案');assert.equal(active.items.length,0);
+  }finally{globalThis.fetch=previous;invalidateReads();}
 });
 
 test('returning to a selected board reloads all affected panels and removes deleted or changed selections',async()=>{
