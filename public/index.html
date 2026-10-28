@@ -166,7 +166,7 @@
           </div>
         </div>
         <div class="cal-month-meta" :aria-busy="calendarLoading||calendarSyncing">
-          <span v-if="!calendarUnavailable">本月 <b>{{ monthSummary.hearings }}</b> 场开庭<span class="cal-meta-sep">·</span>分布于 <b>{{ monthSummary.days }}</b> 天<span v-if="calendarSyncing"> · 正在同步…</span></span>
+          <span v-if="!calendarUnavailable">本月 <b>{{ monthSummary.hearings }}</b> 场开庭<span class="cal-meta-sep">·</span>分布于 <b>{{ monthSummary.days }}</b> 天<span v-if="monthHolidayDays"><span class="cal-meta-sep">·</span>节假日 <b>{{ monthHolidayDays }}</b> 天</span><span v-if="calendarSyncing"> · 正在同步…</span></span>
           <span v-else>{{ calendarError ? '本月日程读取失败' : '正在读取本月日程…' }}</span>
           <span class="cal-key-hint">{{ $state.mobile?'左右滑动换月':'方向键选日期' }}</span>
         </div>
@@ -177,8 +177,8 @@
           <div v-if="visible" class="cal-grid" :class="{'is-loading':calendarLoading}" :style="{'--cal-weeks':monthGrid(page).length/7}" role="group" :aria-label="calTitle+'，使用方向键选日期，PageUp 和 PageDown 切换月份'">
             <div class="cal-wd" v-for="(w,i) in ['一','二','三','四','五','六','日']" :key="w" :class="{weekend:i>4}">周{{ w }}</div>
             <template v-for="(cell,i) in monthGrid(page)" :key="i">
-              <div v-if="cell" class="cal-cell" :class="{today:cell.date===today,sel:cell.date===cal.sel,weekend:i%7>4,'has-events':monthEvents(cell,page).length}">
-                <button class="cal-day-select" :data-date="cell.date" :tabindex="cell.date===cal.sel?0:-1" :aria-label="dayLabel(cell)" :aria-pressed="cell.date===cal.sel" :aria-current="cell.date===today?'date':null" @click="select(cell.date)" @keydown="dayKey($event,cell.date)"><span class="day-num">{{ cell.day }}</span><span class="cal-today-label" v-if="cell.date===today">今天</span></button>
+              <div v-if="cell" class="cal-cell" :class="{today:cell.date===today,sel:cell.date===cal.sel,weekend:i%7>4,'has-events':monthEvents(cell,page).length,'holiday-off':cellHoliday(cell)&&cellHoliday(cell).isOffDay,'holiday-work':cellHoliday(cell)&&!cellHoliday(cell).isOffDay}">
+                <button class="cal-day-select" :data-date="cell.date" :tabindex="cell.date===cal.sel?0:-1" :aria-label="dayLabel(cell)" :aria-pressed="cell.date===cal.sel" :aria-current="cell.date===today?'date':null" @click="select(cell.date)" @keydown="dayKey($event,cell.date)"><span class="day-num">{{ cell.day }}</span><span class="cal-today-label" v-if="cell.date===today">今天</span><span v-if="cellHoliday(cell)" class="cal-holiday-tag" :class="{work:!cellHoliday(cell).isOffDay}">{{ cellHoliday(cell).isOffDay?'休':'班' }}</span><span v-if="cellHoliday(cell)" class="cal-holiday-name">{{ cellHoliday(cell).name }}</span></button>
                 <div class="cal-cell-events" aria-hidden="true">
                   <span class="cal-event-dot" v-for="h in monthEvents(cell,page).slice(0,3)" :key="h.line_id" :class="statusClass(h.状态)"></span>
                   <span class="cal-mobile-time" v-if="monthEvents(cell,page).length">{{ monthEvents(cell,page).length>3 ? monthEvents(cell,page).length+'场' : monthEvents(cell,page)[0].时间||'待定' }}</span>
@@ -195,10 +195,11 @@
           </page-deck>
           <div v-if="calendarLoading||calendarSyncing||calendarError" class="calendar-state" :class="{'is-error':calendarError}" role="status" aria-live="polite"><template v-if="calendarLoading||calendarSyncing"><span class="loading-dot" aria-hidden="true"></span><span>{{ calendarSyncing ? '正在同步 '+calTitle+' 的开庭日程…' : '正在加载 '+calTitle+' 的开庭日程…' }}</span></template><template v-else><span>{{ calTitle }}的日程加载失败：{{ calendarError }}</span><button class="mini-btn" @click="loadCalendar(true)">重试</button></template></div>
         </div>
-        <div class="cal-legend"><span class="lg"><i class="dot st-in"></i>在办</span><span class="lg"><i class="dot st-done"></i>结案</span><span class="lg"><i class="dot st-pend"></i>结案未整卷</span><span class="cal-legend-note">点击日程打开案件</span></div>
+        <div class="cal-legend"><span class="lg"><i class="dot st-in"></i>在办</span><span class="lg"><i class="dot st-done"></i>结案</span><span class="lg"><i class="dot st-pend"></i>结案未整卷</span><span class="lg"><i class="cal-holiday-tag">休</i>法定节假日</span><span class="lg"><i class="cal-holiday-tag work">班</i>调休上班</span><span class="cal-legend-note">点击日程打开案件</span></div>
       </section>
       <aside class="cal-detail" tabindex="-1" aria-label="选中日期的开庭安排" :aria-busy="calendarLoading">
         <div class="cal-detail-head"><p class="cal-eyebrow">当日安排<span v-if="cal.sel===today" class="cal-today-pill">今天</span></p><h3 class="detail-title">{{ detailTitle }}</h3><span class="cal-day-count" v-if="!calendarUnavailable">{{ dayHearings.length }} 场开庭<span v-if="calendarSyncing"> · 同步中</span></span></div>
+        <p class="cal-holiday-note" v-if="selectedHoliday"><span class="cal-holiday-tag" :class="{work:!selectedHoliday.isOffDay}">{{ selectedHoliday.isOffDay?'休':'班' }}</span><span>{{ selectedHoliday.name }}{{ selectedHoliday.isOffDay?' · 法定节假日':' · 调休上班' }}</span></p>
         <div class="cal-agenda" aria-live="polite">
           <loading-skeleton v-if="calendarLoading" :rows="2" label="正在加载当日安排"></loading-skeleton>
           <div class="cal-day-empty" v-else-if="calendarError"><span class="cal-empty-icon" aria-hidden="true">…</span><h4>暂时无法显示安排</h4><p>请重试本月日程读取</p></div>

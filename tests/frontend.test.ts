@@ -170,6 +170,7 @@ function uiHarness(){
   let root:any;
   const context:any={Vue:{reactive:(v:any)=>v,createApp:(v:any)=>{root=v;return app;}},DB:{legacyView:()=>({案件:[],归档:[],事务:[]}),
     caseItem:(c:any)=>({path:c.id,名称:c.name,状态:c.status}),changeEdit:()=>{},invalidateReads:()=>{},rememberDoc:()=>{},web:async()=>({counts:{}})},
+    loadHolidayYear:async()=>[],peekHolidayYear:()=>[],
     location:{hash:'#/kanban'},document:{querySelector:()=>null},window:{addEventListener:()=>{}},setTimeout:()=>{},clearTimeout:()=>{},Date,Map,Set,pageDeck,MOBILE_QUERY,createNavigation,appLocation};
   vm.runInNewContext(readFileSync('public/legacy-app.js','utf8').replace(/^import .*;\r?\n/gm,''),context);
   return {components,context,root,state:app.config.globalProperties.$state};
@@ -613,6 +614,37 @@ test('calendar prefetch failure retains explicit retry and old responses cannot 
   ui.finish(farKey);await old;await flushUi();
   assert.equal(ui.requests.length,count);assert.equal(ui.view.lastDateCounts,counts);assert.equal(ui.view.calendarEntry,ui.cache.entry(key));
 });
+test('calendar marks legal holidays and adjusted workdays from the cached year data',async()=>{
+  const ui=uiHarness();ui.state.cal={y:2025,m:11,sel:'2025-12-31'};
+  const days=[{date:'2025-12-31',name:'元旦',isOffDay:true},{date:'2026-10-01',name:'国庆节',isOffDay:true},{date:'2026-10-10',name:'国庆节',isOffDay:false}];
+  const peeked:number[]=[],loaded:number[]=[];
+  ui.context.peekHolidayYear=(year:number)=>{peeked.push(year);return days.filter(d=>d.date.startsWith(String(year)));};
+  ui.context.loadHolidayYear=async(year:number)=>{loaded.push(year);return days.filter(d=>d.date.startsWith(String(year)));};
+  const component=ui.components['calendar-view'];
+  ui.context.DB.calendar=()=>({loaded:false});
+  const view:any={$state:ui.state,...component.data.call({$state:ui.state})};Object.assign(view,component.methods);
+  await view.loadHolidays();await flushUi();
+  assert.deepEqual([...new Set(peeked)].sort(),[2025,2026]);assert.deepEqual(loaded.sort((a:number,b:number)=>a-b),[2025,2026]);
+  assert.equal(view.holidayInfo('2026-10-01').name,'国庆节');
+  assert.equal(component.computed.monthHolidayDays.call(view),1);   // 2025 年 12 月只有元旦一天
+  assert.equal(component.computed.selectedHoliday.call(view).isOffDay,true);
+  view.byDate=new Map();view.calendarUnavailable=false;view.today='2025-12-31';
+  assert.match(view.dayLabel({date:'2025-12-31'}),/元旦/);
+  assert.match(view.dayLabel({date:'2026-10-10'}),/调休上班/);
+});
+
+test('mobile month grids always render six weeks so short months leave no bare strip',()=>{
+  const ui=uiHarness(),component=ui.components['calendar-view'];
+  ui.state.cal={y:2027,m:1,sel:'2027-02-01'};
+  const view:any={...component.methods,$state:ui.state,cal:ui.state.cal};
+  ui.state.mobile=true;
+  const cells=component.computed.grid.call(view);
+  assert.equal(cells.length,42);assert.equal(cells.filter(Boolean).length,28);assert.equal(cells[41],null);
+  assert.equal(view.monthGrid('next').length,42);assert.equal(view.monthGrid('prev').length,42);
+  ui.state.mobile=false;
+  assert.equal(component.computed.grid.call(view).length,28);   // 桌面按实际周数排版
+});
+
 test('collapsed recent activity shows both stats counts without reading records and opens the selected cached window',async()=>{
   const fetchBefore=globalThis.fetch;invalidateReads();
   const {components,context,root,state}=uiHarness(),requests:any[]=[];

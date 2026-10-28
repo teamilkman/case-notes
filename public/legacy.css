@@ -110,6 +110,13 @@
 .cal-more{position:relative;align-self:flex-start;border:0;background:transparent;font-size:11px;padding:0 5px;color:var(--text-3)}.cal-cell-events{display:none}
 .cal-compact-more{display:none}
 .cal-event-dot{width:4px;height:4px;border-radius:50%;background:#8b9690}.cal-event-dot.st-in{background:var(--accent)}.cal-event-dot.st-pend{background:#b49244}.cal-mobile-time{display:block;width:100%;font-family:var(--mono);font-size:11px;text-align:center;color:var(--text-3);margin-top:3px}
+/* 法定节假日：暖红色块；调休上班只加「班」标记，不改变日期格底色。 */
+.cal-cell.holiday-off{background:#fdf3ef}.cal-cell.holiday-off.weekend{background:#fdf0e9}.cal-cell.holiday-off .day-num{color:#b2533f}
+.cal-holiday-tag{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:15px;height:15px;margin-top:5px;padding:0 2px;border-radius:3px;background:#c0564a;color:#fff;font-size:11px;font-weight:600;line-height:1;font-style:normal;letter-spacing:0}
+.cal-holiday-tag.work{background:#e6ece7;color:#55685d}
+.cal-holiday-name{min-width:0;max-width:100%;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:#a8564a}
+.cal-holiday-note{display:flex;align-items:center;gap:6px;margin:0;padding:12px 22px 0;font-size:12px;color:#a8564a}.cal-holiday-note .cal-holiday-tag{margin-top:0}
+.cal-legend .cal-holiday-tag{margin-top:0;margin-right:6px}
 .cal-legend{display:flex;align-items:center;gap:16px;padding:16px 24px;color:var(--text-3);font-size:11px;border-top:1px solid var(--border)}.lg{display:inline-flex;align-items:center}.dot{width:7px;height:7px;border-radius:50%;margin-right:5px;display:inline-block;flex-shrink:0}.cal-wrap .dot.st-in{background:var(--accent)}.cal-wrap .dot.st-done{background:#8b9690}.cal-wrap .dot.st-pend{background:#b49244}.cal-legend-note{margin-left:auto}
 .cal-detail{min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden}.cal-detail-head{padding:24px 22px 20px;border-bottom:1px solid var(--border)}.cal-detail-head .cal-eyebrow{display:flex;align-items:center;justify-content:space-between}.cal-today-pill{font-size:11px;letter-spacing:0;font-weight:500;color:var(--accent);border:1px solid #d4e3d9;background:var(--accent-soft);padding:3px 7px;border-radius:5px}
 .detail-title{margin:14px 0 8px;font-size:16px;font-weight:600;line-height:1.5}.cal-day-count{font-size:12px;color:var(--text-3)}.cal-agenda{padding:8px 22px;max-height:480px;overflow-y:auto;overscroll-behavior:contain}.cal-agenda .skeleton-stack{padding:14px 0}
@@ -336,10 +343,12 @@
   .cal-nav{padding:4px 10px;gap:0}.cal-month-title{display:none}
   .cal-month-tools{gap:6px}.cal-month-trigger{font-size:13px}
   .cal-month-meta,.cal-key-hint,.cal-legend,.cal-detail-foot,.cal-next{display:none}
-  .cal-grid{grid-template-rows:24px repeat(var(--cal-weeks),48px);padding:0 4px}
+  .cal-grid{grid-template-rows:24px repeat(var(--cal-weeks),48px);padding:0 2px}
   .cal-wd{padding:4px 0;font-size:12px;line-height:16px}
-  .cal-cell{min-height:48px;padding:28px 2px 2px;gap:0}
-  .cal-day-select{min-height:44px;padding:2px 0}.day-num{width:24px;height:24px}
+  .cal-cell{min-height:48px;padding:28px 3px 2px;gap:0}
+  .cal-day-select{min-height:44px;padding:3px 3px;gap:2px}.day-num{width:24px;height:24px}
+  .cal-cell:is(.holiday-off,.holiday-work) .day-num{width:20px;height:20px;font-size:12px}
+  .cal-holiday-name{display:none}.cal-holiday-tag{margin-top:3px;height:14px;min-width:14px;padding:0 2px}.cal-holiday-note{padding:6px 12px 0;font-size:11px}
   .cal-cell-events{gap:1px 3px}.cal-mobile-time{margin-top:0;line-height:12px}
   .cal-detail-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px}
   .cal-detail-head .cal-eyebrow{display:none}.cal-detail-head .detail-title{flex:1;margin:0;font-size:14px;line-height:1.6}

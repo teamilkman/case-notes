@@ -2,6 +2,7 @@ import './db-adapter.js';
 import {pageDeck,MOBILE_QUERY} from './page-deck.js';
 import {createNavigation} from './navigation.js';
 import {appLocation} from './app-location.js';
+import {loadHolidayYear,peekHolidayYear} from './holidays.js';
 
 const { createApp, reactive } = Vue;
 
@@ -623,7 +624,7 @@ app.component('kanban-view', {
 app.component('calendar-view', {
   props:{active:{default:true}},
   template:'#cal-tpl',
-  data(){return {heatExpand:false,heatGran:'month',monthPickerOpen:false,pickerYear:this.$state.cal.y,calendarEntry:DB.calendar(this.$state.cal.y,this.$state.cal.m),calendarSeq:0,seenChange:this.$state.change,lastDateCounts:null,pendingMonth:null};},
+  data(){return {heatExpand:false,heatGran:'month',monthPickerOpen:false,pickerYear:this.$state.cal.y,calendarEntry:DB.calendar(this.$state.cal.y,this.$state.cal.m),calendarSeq:0,seenChange:this.$state.change,lastDateCounts:null,pendingMonth:null,holidayDates:{},holidaySeq:0};},
   computed:{
     D(){ return this.$state.D; },
     today(){ return todayStr(); },
@@ -649,8 +650,7 @@ app.component('calendar-view', {
       const days=new Date(y,m+1,0).getDate();
       const cells=Array(lead).fill(null);
       for(let d=1;d<=days;d++) cells.push({date:`${y}-${pad(m+1)}-${pad(d)}`, day:d});
-      while(cells.length%7) cells.push(null);
-      return cells;
+      return this.fillWeeks(cells);
     },
     byDate(){
       const d=this.D, m=new Map();
@@ -659,6 +659,12 @@ app.component('calendar-view', {
       return m;
     },
     dayHearings(){ return this.byDate.get(this.$state.cal.sel)||[]; },
+    selectedHoliday(){ const s=this.$state.cal.sel; return s?(this.holidayDates[s]||null):null; },
+    monthHolidayDays(){  // 本月法定节假日天数,不含调休上班
+      const {y,m}=this.$state.cal,prefix=`${y}-${pad(m+1)}`;let n=0;
+      for(const [date,h] of Object.entries(this.holidayDates)) if(h.isOffDay&&date.startsWith(prefix)) n++;
+      return n;
+    },
     detailTitle(){
       const s=this.$state.cal.sel; if(!s) return '';
       const [y,m,d]=s.split('-').map(Number);
@@ -678,13 +684,29 @@ app.component('calendar-view', {
       return [...years].sort((a,b)=>b-a).map(y=>this.yearMonthHeat(y));
     },
   },
-  mounted(){viewControllers.calendar=this;afterFirstScreen([this.loadCalendar()]);},
+  mounted(){viewControllers.calendar=this;afterFirstScreen([this.loadCalendar(),this.loadHolidays()]);},
   activated(){this.refresh();},
   deactivated(){this.leave();},
-  watch:{active(value){if(value)this.refresh();else this.leave();},'$state.cal.y'(){this.loadCalendar();},'$state.cal.m'(){this.loadCalendar();},'$state.cal.sel'(){this.$nextTick(()=>{const agenda=this.$el.querySelector('.cal-agenda');if(agenda)agenda.scrollTop=0;});}},
+  watch:{active(value){if(value)this.refresh();else this.leave();},'$state.cal.y'(){this.loadCalendar();this.loadHolidays();},'$state.cal.m'(){this.loadCalendar();this.loadHolidays();},'$state.cal.sel'(){this.$nextTick(()=>{const agenda=this.$el.querySelector('.cal-agenda');if(agenda)agenda.scrollTop=0;});}},
   methods:{
     refresh(){viewControllers.calendar=this;if(this.seenChange!==this.$state.change){this.seenChange=this.$state.change;this.loadCalendar();}},
     leave(){this.monthPickerOpen=false;if(this.pendingMonth)this.monthSwiped('next');},
+    loadHolidays(){
+      const {y,m}=this.$state.cal,years=[y];
+      if(m===0)years.push(y-1);   // 相邻月份预览可能跨年,顺带取上一年的 12 月
+      if(m===11)years.push(y+1);
+      const seq=++this.holidaySeq;
+      const apply=()=>{
+        if(seq!==this.holidaySeq)return;
+        const dates={};
+        for(const year of years) for(const day of peekHolidayYear(year)) dates[day.date]=day;
+        this.holidayDates=dates;
+      };
+      apply();   // 先用本机副本着色,联网读取完成后替换
+      return Promise.all(years.map(year=>loadHolidayYear(year))).then(apply).catch(()=>{});
+    },
+    holidayInfo(date){ return this.holidayDates[date]||null; },
+    cellHoliday(cell){ return this.holidayInfo(cell.date); },
     loadCalendar(force=false){
       const {y,m}=this.$state.cal;this.calendarEntry=DB.calendar(y,m);
       const entry=this.calendarEntry;
@@ -704,7 +726,14 @@ app.component('calendar-view', {
       const date=target?new Date(target.y,target.m,1):new Date(this.cal.y,this.cal.m+(page==='next'?1:-1),1),y=date.getFullYear(),m=date.getMonth();
       const cells=Array((date.getDay()+6)%7).fill(null);
       for(let day=1;day<=new Date(y,m+1,0).getDate();day++)cells.push({date:`${y}-${pad(m+1)}-${pad(day)}`,day});
-      while(cells.length%7)cells.push(null);return cells;
+      return this.fillWeeks(cells);
+    },
+    fillWeeks(cells){
+      // 手机端三个月份面板并排在同一行,行数不同会让短月份下方留下白边;
+      // 统一补到 6 周空白格,各面板高度一致(普通月份最多 6 周)。
+      const rows=this.$state.mobile?6:0;
+      while(cells.length%7||cells.length<rows*7)cells.push(null);
+      return cells;
     },
     monthEvents(cell,page){
       if(page==='current')return this.cellHearings(cell);
@@ -736,7 +765,8 @@ app.component('calendar-view', {
     },
     select(date){ this.$state.cal.sel=date; },
     dayLabel(cell){
-      return `${cell.date} ${wk(cell.date)}${cell.date===this.today?'，今天':''}，${this.calendarUnavailable?'日程尚未加载':this.cellHearings(cell).length+'场开庭'}`;
+      const h=this.holidayInfo(cell.date),holiday=h?`，${h.name}，${h.isOffDay?'法定节假日':'调休上班'}`:'';
+      return `${cell.date} ${wk(cell.date)}${cell.date===this.today?'，今天':''}${holiday}，${this.calendarUnavailable?'日程尚未加载':this.cellHearings(cell).length+'场开庭'}`;
     },
     changeMonth(value){
       if(!/^\d{4}-\d{2}$/.test(value))return;

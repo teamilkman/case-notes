@@ -5,6 +5,7 @@ import { completeTodo, executeTool, resolveCase, saveNotes, toolNames } from './
 import { changeToken } from './queries';
 import { AppError, failure, success, type Env } from './types';
 import { webRead } from './web-queries';
+import { holidayCalendar } from './holidays';
 import { handleOAuth, oauthChallenge } from './oauth';
 
 function json(data:unknown,status=200,extra:Record<string,string>={}) {
@@ -58,6 +59,11 @@ export default {
           for(const cookie of p.webSession?.cookieUpgrade??[])response.headers.append('Set-Cookie',cookie);return response;
         }
         if(path.startsWith('/api/v1/')&&request.method==='POST')return json(await executeTool(env,p,path.slice('/api/v1/'.length),await body(request)));
+        if(path==='/api/holidays'&&request.method==='GET'){
+          const raw=url.searchParams.get('year')??'',year=Number(raw);
+          if(!/^\d{4}$/.test(raw)||!Number.isInteger(year))throw new AppError('INVALID_ARGUMENT','year 须为四位年份。',null,400);
+          return json(success(await holidayCalendar(year,ctx)));
+        }
         if(path==='/api/web/complete-todo'&&request.method==='POST')return json(await completeTodo(env,p,validated(webTodo,await body(request))));
         if(path==='/api/web/save-notes'&&request.method==='POST')return json(await saveNotes(env,p,validated(webNotesSchema,await body(request))));
         if(path.startsWith('/api/web/')&&request.method==='POST')return json(await webRead(env,p,path.slice('/api/web/'.length),await body(request)));
