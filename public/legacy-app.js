@@ -160,7 +160,7 @@ const app = createApp({
     D(){ return this.$state.D; },
     futureCount(){return this.$state.counts.future??'-';},
     monthCount(){return this.$state.counts.month??'-';},
-    swipeLocked(){const view=viewControllers[this.$state.view];return !!(viewControllers.cases?.saving||view?.editing||view?.dlg||view?.monthPickerOpen);},
+    swipeLocked(){const view=viewControllers[this.$state.view];return !!(viewControllers.cases?.saving||view?.editing||view?.dlg||view?.createDlg||view?.monthPickerOpen);},
   },
   methods:{
     loadStats,
@@ -265,7 +265,7 @@ app.component('page-tail',{
 app.component('cases-view', {
   props:{active:{default:true}},
   template:'#cases-tpl',
-  data(){ return {feed:DB.feed('cases',{group:'active',query:''}),seenChange:this.$state.change,docChange:-1, group:'在办', editing:false,editPane:'write', editText:'', saving:false, mdText:'', mdLoading:true, mdErr:false, mdSeq:0, dlg:false, dlgPos:0, dlgDate:'', dlgTime:'', dlgText:'', dbDoc:null, dbEditor:null, editError:'',closingCase:null }; },
+  data(){ return {feed:DB.feed('cases',{group:'active',query:''}),seenChange:this.$state.change,docChange:-1, group:'在办', editing:false,editPane:'write', editText:'', saving:false, mdText:'', mdLoading:true, mdErr:false, mdSeq:0, dlg:false, dlgPos:0, dlgDate:'', dlgTime:'', dlgText:'', dbDoc:null, dbEditor:null, editError:'',closingCase:null,createDlg:false,createName:'',createKind:'case',createError:'',createPending:false }; },
   computed:{
     D(){ return this.$state.D; },
     selCase(){ return this.$state.selCase; },
@@ -291,6 +291,43 @@ app.component('cases-view', {
   deactivated(){this.closingCase=null;},
   unmounted(){this.mdSeq++;},
   methods:{
+    openCreate(){
+      if(this.saving||this.$state.connection.offline)return;
+      const pending=DB.pendingCreate();
+      if(pending){this.createName=pending.name;this.createKind=pending.kind;}
+      else if(!this.createName)this.createKind=this.group==='事务'?'affair':'case';
+      this.createPending=!!pending;this.createError='';this.createReturnFocus=document.activeElement;this.createDlg=true;
+      this.$nextTick(()=>this.$refs.createName?.focus());
+    },
+    closeCreate(){
+      if(this.saving)return;
+      this.createDlg=false;this.$nextTick(()=>this.createReturnFocus?.focus({preventScroll:true}));
+    },
+    createKey(event){
+      if(event.key==='Escape'){event.preventDefault();this.closeCreate();return;}
+      if(event.key!=='Tab')return;
+      const targets=[...event.currentTarget.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled)')];
+      if(event.shiftKey&&event.target===targets[0]){event.preventDefault();targets.at(-1)?.focus();}
+      else if(!event.shiftKey&&event.target===targets.at(-1)){event.preventDefault();targets[0]?.focus();}
+    },
+    async submitCreate(){
+      if(this.saving||this.$state.connection.offline)return;
+      if(!this.createName.trim()){this.createError='请输入名称';this.$refs.createName?.focus();return;}
+      this.saving=true;this.createError='';
+      let receipt;
+      try{receipt=await DB.createCase({name:this.createName,kind:this.createKind});}
+      catch(e){this.createError=e.code==='CASE_AMBIGUOUS'?'已有同名案件或事务，请更换名称，或取消后搜索已有笔记。':e.message;this.createPending=!!DB.pendingCreate();return;}
+      finally{this.saving=false;}
+      const kind=this.createKind;
+      this.createDlg=false;this.createName='';this.createPending=false;
+      toast('笔记已创建','ok');changed();
+      rememberCase({id:receipt.case_id,name:receipt.case_name,kind,status:'在办'});
+      this.group=kind==='affair'?'事务':'在办';
+      this.seenChange=this.$state.change;this.loadList();
+      openCase(receipt.case_id);
+      await this.$nextTick();await this.loadMd();
+      if(this.$state.selCase===receipt.case_id&&!this.mdErr){await this.enterEdit();this.$nextTick(()=>this.$refs.editor?.focus({preventScroll:true}));}
+    },
     refresh(){viewControllers.cases=this;if(this.seenChange!==this.$state.change){this.seenChange=this.$state.change;this.loadList();if(!this.editing&&!this.saving)this.loadMd(true);}},
     dialogKey(event){
       if(event.key==='Escape'&&!this.saving){event.preventDefault();this.dlg=false;return;}

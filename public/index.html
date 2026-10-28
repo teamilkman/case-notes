@@ -268,10 +268,10 @@
 
 <template id="cases-tpl">
   <main class="cases-wrap" :class="{'has-sel':!!selCase,'is-editing':editing}">
-    <page-deck class="cases-layout" label="案件列表与详情，右滑返回上级" :model-value="selCase?'detail':'list'" :items="['list','detail']" desktop="columns" :disabled="!selCase||editing||saving||dlg||($state.caseParent&&$state.caseParent!=='cases')" contain @update:model-value="detailSwiped" @settled="detailSettled">
+    <page-deck class="cases-layout" label="案件列表与详情，右滑返回上级" :model-value="selCase?'detail':'list'" :items="['list','detail']" desktop="columns" :disabled="!selCase||editing||saving||dlg||createDlg||($state.caseParent&&$state.caseParent!=='cases')" contain @update:model-value="detailSwiped" @settled="detailSettled">
     <template #default="{item}">
     <div v-if="item==='list'" class="cases-left">
-      <div class="cases-filter"><div class="cases-list-title"><h3>{{ group==='事务'?'事务':group+'案件' }}</h3><span>{{ feed.total??'—' }} 项</span></div>
+      <div class="cases-filter"><div class="cases-list-title"><h3>{{ group==='事务'?'事务':group+'案件' }} <span>{{ feed.total??'—' }} 项</span></h3><button class="mini-btn primary" :disabled="saving||$state.connection.offline" @click="openCreate">新建笔记</button></div>
         <div class="seg-sm section-tabs" :style="{'--active-tab':groups.indexOf(group),'--tab-count':groups.length}">
           <button v-for="g in groups" :key="g" :class="{on: group===g}" :aria-pressed="group===g" @click="group=g">{{ g }}<i>{{ count(g) }}</i></button>
         </div>
@@ -359,6 +359,19 @@
     </div>
     </template>
     </page-deck>
+    <teleport to="body"><transition name="dialog">
+      <div v-if="createDlg" class="dlg-mask" @click.self="closeCreate">
+        <form class="dlg create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-title" aria-describedby="create-hint" @submit.prevent="submitCreate" @keydown="createKey">
+          <div class="dlg-head"><h3 id="create-title">新建笔记</h3><button type="button" class="icon-btn" aria-label="关闭新建笔记窗口" :disabled="saving" @click="closeCreate"><ui-icon name="close"></ui-icon></button></div>
+          <p id="create-hint">创建后进入编辑，记录笔记正文。</p>
+          <label for="create-name">名称</label><input ref="createName" id="create-name" v-model="createName" required maxlength="200" autocomplete="off" :readonly="createPending" :disabled="saving" placeholder="填写案件或事务名称">
+          <label class="create-kind-label" for="create-kind">类型</label><select id="create-kind" v-model="createKind" :disabled="saving||createPending"><option value="case">案件</option><option value="affair">事务</option></select>
+          <p v-if="createPending" class="create-pending" role="status">上次创建结果尚未确认，请重试以核对结果。</p>
+          <div v-if="createError" class="errbar" role="alert">{{ createError }}</div>
+          <div class="dlg-actions"><button type="button" class="mini-btn" :disabled="saving" @click="closeCreate">取消</button><button class="mini-btn primary" type="submit" :disabled="saving||$state.connection.offline">{{ saving?'创建中…':createPending?'重试创建':'创建并编辑' }}</button></div>
+        </form>
+      </div>
+    </transition></teleport>
   </main>
 </template>
 

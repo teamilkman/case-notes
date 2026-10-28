@@ -261,6 +261,18 @@ export async function save(editor){
   try {const receipt=await request('/api/web/save-notes',job.args);job.clear();sessionStorage.removeItem('case-notes:draft:'+editor.ref);return receipt;}
   catch(e){if(!e.retryable&&e.commitState!=='unknown')job.clear();throw e;}
 }
+export function pendingCreate(){
+  migrateSessionStorage();
+  try{return JSON.parse(sessionStorage.getItem('case-notes:pending:create:new'))?.args||null;}catch{return null;}
+}
+export async function createCase(fields){
+  await ensureOnline();
+  const original=pendingCreate();
+  const base=original?Object.fromEntries(Object.entries(original).filter(([k])=>k!=='request_key')):fields;
+  const job=pending('create','new',base);
+  try{const receipt=await api('cases_create',job.args);job.clear();return receipt;}
+  catch(e){if(!e.retryable&&e.commitState!=='unknown')job.clear();throw e;}
+}
 export async function complete(todo){
   await ensureOnline();
   const job=pending('todo',todo.line_id,{case_ref:todo.case_id,line_id:todo.line_id,expected_line_version:todo.version});
@@ -284,4 +296,4 @@ function sanitize(html){
   }
   return doc.body.innerHTML;
 }
-if(typeof window!=='undefined')window.DB={connection,reconnect,resume,web,pager,peek:peekPage,feed,calendar,readCalendar,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,save,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};
+if(typeof window!=='undefined')window.DB={connection,reconnect,resume,web,pager,peek:peekPage,feed,calendar,readCalendar,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,save,createCase,pendingCreate,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};

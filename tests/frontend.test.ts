@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {legacyView,save,complete,feed,invalidateReads,beginEdit,changeEdit,restoreDraft,logout} from '../public/db-adapter.js';
+import {legacyView,save,createCase,pendingCreate,complete,feed,invalidateReads,beginEdit,changeEdit,restoreDraft,logout} from '../public/db-adapter.js';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {parseLine} from '../src/parser';
@@ -40,6 +40,38 @@ function storage(){
   return Object.assign(data,{getItem:(k:string)=>typeof data[k]==='string'?data[k]:null,
     setItem:(k:string,v:string)=>{data[k]=v;},removeItem:(k:string)=>{delete data[k];}}) as unknown as Storage;
 }
+
+test('an uncertain create survives reload and replays its original fields and key',async()=>{
+  const previous={storage:globalThis.sessionStorage,fetch:globalThis.fetch};
+  globalThis.sessionStorage=storage();const sent:any[]=[];
+  globalThis.fetch=async(path,options)=>{
+    assert.equal(path,'/api/v1/cases_create');sent.push(JSON.parse(String(options?.body)));
+    return sent.length===1?new Response('{'):Response.json({ok:true,data:{case_id:'new-case',replayed:true}});
+  };
+  try{
+    await assert.rejects(createCase({name:'合成事务',kind:'affair'}));
+    assert.equal(pendingCreate()?.name,'合成事务');
+    const ui=uiHarness(),view:any={...ui.components['cases-view'].methods,$state:ui.state,$nextTick:()=>Promise.resolve(),$refs:{},group:'在办'};
+    ui.state.connection={offline:false};ui.context.DB.pendingCreate=pendingCreate;
+    view.openCreate();assert.equal(view.createName,'合成事务');assert.equal(view.createKind,'affair');assert.equal(view.createPending,true);
+    assert.equal((await createCase({name:'不能替换未确认请求',kind:'case'})).replayed,true);
+    assert.deepEqual(sent[1],sent[0]);assert.equal(pendingCreate(),null);
+  }finally{globalThis.sessionStorage=previous.storage;globalThis.fetch=previous.fetch;}
+});
+
+test('creating a note blocks duplicate submission, opens the created document and enters the existing editor',async()=>{
+  const ui=uiHarness(),methods=ui.components['cases-view'].methods;let release:(v:any)=>void=()=>{},calls=0,edited=0;
+  ui.state.connection={offline:false};ui.state.view='cases';
+  ui.context.DB.caseItem=(c:any)=>({path:c.id,名称:c.name,状态:c.kind==='affair'?'事务':c.status});
+  ui.context.DB.createCase=()=>{calls++;return new Promise(r=>{release=r;});};
+  const view:any={...methods,$state:ui.state,createName:'合成新笔记',createKind:'affair',createDlg:true,$refs:{},$nextTick:()=>Promise.resolve(),
+    loadList:()=>{},loadMd:async()=>{},enterEdit:async()=>{edited++;}};
+  const job=view.submitCreate();assert.equal(view.saving,true);await view.submitCreate();assert.equal(calls,1);
+  release({case_id:'created',case_name:'合成新笔记'});await job;
+  assert.equal(view.saving,false);assert.equal(view.createDlg,false);assert.equal(ui.state.selCase,'created');assert.equal(view.group,'事务');assert.equal(edited,1);
+  assert.equal(ui.state.D.事务[0].名称,'合成新笔记');
+  view.createDlg=true;const nav=createNavigation(ui.state,()=>view);assert.equal(nav.back(),true);assert.equal(view.createDlg,false);assert.equal(ui.state.selCase,'created');
+});
 test('daily quota failure keeps an uncertain save key and versioned draft for replay after reload',async()=>{
   const previous={storage:globalThis.sessionStorage,confirm:globalThis.confirm,fetch:globalThis.fetch};
   globalThis.sessionStorage=storage();globalThis.confirm=()=>true;const sent:any[]=[];
