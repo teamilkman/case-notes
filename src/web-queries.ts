@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { caseJsonWithRecent, recentActivity, lineJson, contains, indexedLines, lineRelations } from './queries';
 import { AppError, canonical, sha256, success, type Env, type Principal } from './types';
+import { webCalendarDatesSchema } from './schemas';
 
 const date=z.iso.date();
 const paging={limit:z.number().int().min(1).max(100).default(20),cursor:z.string().max(4096).optional()};
@@ -11,6 +12,7 @@ const schemas={
   activity:z.object({...paging,today:date,days:z.union([z.literal(7),z.literal(30)])}).strict(),
   stats:z.object({today:date}).strict(),
   'calendar-counts':z.object({}).strict(),
+  'calendar-dates':webCalendarDatesSchema,
 };
 const stmt=(env:Env,sql:string,params:unknown[]=[])=>env.DB.prepare(sql).bind(...params);
 const joined='FROM cases c JOIN log_lines l ON l.case_id=c.id JOIN line_index i ON i.line_id=l.id';
@@ -42,7 +44,18 @@ export async function webRead(env:Env,p:Principal,name:string,input:unknown){
     return success({items:r.results});
   }
   let from:string,where:string,key:string,row:string;
-  if(name==='cases'){
+  if(name==='calendar-dates'){
+    const range=[p.workspaceId,a.from_date,a.to_date];
+    const candidates=[
+      `SELECT i.line_id,i.record_date AS calendar_date,i.record_time AS calendar_time ${records} AND ${valid} AND i.record_date BETWEEN ? AND ? AND i.kind<>'schedule' AND (i.kind<>'todo' OR i.due_date IS NULL)`,
+      `SELECT i.line_id,i.due_date,i.due_time ${todos} AND ${valid} AND i.kind='todo' AND i.due_date BETWEEN ? AND ?`,
+      `SELECT i.line_id,i.event_date,i.event_time ${events} AND ${valid} AND i.kind='schedule' AND c.kind='affair' AND i.event_date BETWEEN ? AND ?`,
+    ].join(' UNION ALL ');
+    from=`FROM (${candidates}) d JOIN log_lines l ON l.id=d.line_id JOIN cases c ON c.id=l.case_id JOIN line_index i ON i.line_id=l.id`;
+    params.splice(0,params.length,...range,...range,...range);where='1=1';
+    row=`json_set(${lineJson},'$.case_kind',c.kind,'$.calendar_date',d.calendar_date,'$.calendar_time',d.calendar_time)`;
+    key="d.calendar_date||'|'||COALESCE(d.calendar_time,'99:99')||'|'||l.id";
+  }else if(name==='cases'){
     from='FROM cases c';where='c.workspace_id=?';
     where+=a.group==='affairs'?" AND c.kind='affair'":a.group==='archived'?" AND c.kind='case' AND c.status<>'在办'":" AND c.kind='case' AND c.status='在办'";
     if(a.query){where+=` AND (${['c.name','c.cause','c.case_number','c.court'].map(contains).join(' OR ')} OR EXISTS(SELECT 1 FROM case_aliases x WHERE x.case_id=c.id AND ${contains('x.alias')}) OR EXISTS(SELECT 1 FROM log_lines x WHERE x.case_id=c.id AND x.deleted_at IS NULL AND ${contains('x.raw_text')}))`;params.push(...Array(6).fill(a.query));}

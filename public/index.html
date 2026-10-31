@@ -15,7 +15,8 @@
 <body>
 
 <template id="app-tpl">
-  <div>
+  <div @touchstart.capture="pullStart" @touchmove.capture="pullMove" @touchend.capture="pullEnd" @touchcancel.capture="pullCancel">
+    <div v-if="$state.mobile&&(pull.distance||pull.refreshing)" class="pull-refresh-indicator" role="status" aria-live="polite" :style="{top:Math.min(pull.distance,72)+8+'px'}"><span v-if="pull.refreshing" class="loading-dot" aria-hidden="true"></span><span v-else aria-hidden="true">↓</span><span>{{ pull.refreshing?'正在刷新…':pull.ready?'松开刷新':'下拉刷新' }}</span></div>
     <a class="skip-link" href="#workspace" @click.prevent="$refs.workspace.focus()">跳到工作区</a>
     <header class="app-header">
       <div class="brand"><img class="mark" src="/web/logo.svg" alt=""><div><h1>案记</h1><span>个人工作空间</span></div></div>
@@ -147,9 +148,13 @@
       <section class="cal-month" :class="{'picker-open':monthPickerOpen}" aria-label="月历">
         <div class="cal-nav">
           <div class="cal-month-title"><span class="cal-eyebrow">{{ cal.y }} 年</span><h3>{{ cal.m+1 }}<span>月</span></h3></div>
+          <div class="cal-month-meta" :aria-busy="calendarLoading||calendarSyncing">
+            <span v-if="!calendarUnavailable"><span class="cal-summary-full">本月 <b>{{ monthSummary.hearings }}</b> 场开庭<span class="cal-meta-sep">·</span>分布于 <b>{{ monthSummary.days }}</b> 天<span v-if="monthHolidayDays"><span class="cal-meta-sep">·</span>节假日 <b>{{ monthHolidayDays }}</b> 天</span></span><span class="cal-summary-brief"><b>{{ monthSummary.hearings }}</b> 场<span class="cal-meta-sep">·</span><b>{{ monthSummary.days }}</b> 天</span><span v-if="calendarSyncing"> · 正在同步…</span></span>
+            <span v-else>{{ calendarError ? '本月日程读取失败' : '正在读取本月日程…' }}</span>
+          </div>
           <div class="cal-month-tools">
             <div class="cal-jump">
-              <button ref="monthTrigger" class="cal-month-trigger" aria-label="选择月份" aria-haspopup="dialog" :aria-expanded="monthPickerOpen" aria-controls="calendar-month-picker" @click="toggleMonthPicker"><ui-icon name="calendar"></ui-icon><span>{{ calTitle }}</span><ui-icon name="chevron"></ui-icon></button>
+              <button ref="monthTrigger" class="cal-month-trigger" aria-label="选择月份" :title="calTitle" aria-haspopup="dialog" :aria-expanded="monthPickerOpen" aria-controls="calendar-month-picker" @click="toggleMonthPicker"><ui-icon name="calendar"></ui-icon><span class="cal-trigger-full">{{ calTitle }}</span><span class="cal-trigger-short">{{ cal.m+1 }}月</span><ui-icon name="chevron"></ui-icon></button>
               <teleport v-if="monthPickerOpen" to="body" :disabled="!$state.mobile">
                 <div class="cal-picker-backdrop" aria-hidden="true" @click="closeMonthPicker()"></div>
                 <div id="calendar-month-picker" ref="monthPicker" class="cal-month-picker" role="dialog" aria-modal="true" aria-label="选择年份和月份" @keydown="monthPickerKey">
@@ -161,14 +166,10 @@
                 </div>
               </teleport>
             </div>
+            <button type="button" class="cal-date-switch" role="switch" :aria-checked="!!cal.showDates" aria-label="日历显示范围：仅开庭 / 全部日程" title="切换整个月历的显示范围；全部日程包括开庭、待办、记录、已完成记录和事务日程" @click="cal.showDates=!cal.showDates"><span class="cal-switch-only">仅开庭</span><span class="cal-switch-track" aria-hidden="true"></span><span class="cal-switch-all">全部日程</span></button>
             <button class="go-today" @click="goToday">今天</button>
             <div class="cal-arrows"><button class="nav" aria-label="上个月" @click="nav(-1)">‹</button><button class="nav" aria-label="下个月" @click="nav(1)">›</button></div>
           </div>
-        </div>
-        <div class="cal-month-meta" :aria-busy="calendarLoading||calendarSyncing">
-          <span v-if="!calendarUnavailable">本月 <b>{{ monthSummary.hearings }}</b> 场开庭<span class="cal-meta-sep">·</span>分布于 <b>{{ monthSummary.days }}</b> 天<span v-if="monthHolidayDays"><span class="cal-meta-sep">·</span>节假日 <b>{{ monthHolidayDays }}</b> 天</span><span v-if="calendarSyncing"> · 正在同步…</span></span>
-          <span v-else>{{ calendarError ? '本月日程读取失败' : '正在读取本月日程…' }}</span>
-          <span class="cal-key-hint">{{ $state.mobile?'左右滑动换月':'方向键选日期' }}</span>
         </div>
         <div class="cal-grid-wrap" data-swipe-contained :aria-busy="calendarLoading" @pointerdown.stop @touchstart.stop>
           <!-- Month contacts stay here even during recentering or at an edge. -->
@@ -180,12 +181,12 @@
               <div v-if="cell" class="cal-cell" :class="{today:cell.date===today,sel:cell.date===cal.sel,weekend:i%7>4,'has-events':monthEvents(cell,page).length,'holiday-off':cellHoliday(cell)&&cellHoliday(cell).isOffDay,'holiday-work':cellHoliday(cell)&&!cellHoliday(cell).isOffDay}">
                 <button class="cal-day-select" :data-date="cell.date" :tabindex="cell.date===cal.sel?0:-1" :aria-label="dayLabel(cell)" :aria-pressed="cell.date===cal.sel" :aria-current="cell.date===today?'date':null" @click="select(cell.date)" @keydown="dayKey($event,cell.date)"><span class="day-num">{{ cell.day }}</span><span class="cal-today-label" v-if="cell.date===today">今天</span><span v-if="cellHoliday(cell)" class="cal-holiday-tag" :class="{work:!cellHoliday(cell).isOffDay}">{{ cellHoliday(cell).isOffDay?'休':'班' }}</span><span v-if="cellHoliday(cell)" class="cal-holiday-name">{{ cellHoliday(cell).name }}</span></button>
                 <div class="cal-cell-events" aria-hidden="true">
-                  <span class="cal-event-dot" v-for="h in monthEvents(cell,page).slice(0,3)" :key="h.line_id" :class="statusClass(h.状态)"></span>
-                  <span class="cal-mobile-time" v-if="monthEvents(cell,page).length">{{ monthEvents(cell,page).length>3 ? monthEvents(cell,page).length+'场' : monthEvents(cell,page)[0].时间||'待定' }}</span>
+                  <span class="cal-event-dot" v-for="h in monthEvents(cell,page).slice(0,3)" :key="h.line_id" :class="itemClass(h)"></span>
+                  <span class="cal-mobile-time" v-if="monthEvents(cell,page).length">{{ monthEvents(cell,page).length>3 ? monthEvents(cell,page).length+itemUnit : itemTime(monthEvents(cell,page)[0]) }}</span>
                 </div>
-                <button v-for="h in monthEvents(cell,page).slice(0,2)" :key="h.line_id" class="cal-event" :class="statusClass(h.状态)" :title="(h.时间||'时间待定')+' '+h.案件+' '+h.文本" @click="doOpenCase(cell.date,h.path)"><span class="ct">{{ h.时间||'待定' }}</span><span class="cn">{{ h.案件 }}</span></button>
-                <button class="cal-more" v-if="monthEvents(cell,page).length>2" @click="select(cell.date)">另 {{ monthEvents(cell,page).length-2 }} 场</button>
-                <button class="cal-more cal-compact-more" v-if="monthEvents(cell,page).length>1" :aria-label="'查看'+cell.date+'的全部'+monthEvents(cell,page).length+'场开庭'" @click="select(cell.date)">另 {{ monthEvents(cell,page).length-1 }} 场</button>
+                <button v-for="h in monthEvents(cell,page).slice(0,2)" :key="h.line_id" class="cal-event" :class="itemClass(h)" :title="(h.类型||'开庭')+' '+itemTime(h)+' '+h.案件+' '+h.文本" @click="doOpenCase(cell.date,h.path)"><span class="ct">{{ itemTime(h) }}</span><span class="cn">{{ h.类型 ? h.类型+' · ' : '' }}{{ h.案件 }}</span></button>
+                <button class="cal-more" v-if="monthEvents(cell,page).length>2" @click="select(cell.date)">另 {{ monthEvents(cell,page).length-2 }} {{ itemUnit }}</button>
+                <button class="cal-more cal-compact-more" v-if="monthEvents(cell,page).length>1" :aria-label="'查看'+cell.date+'的全部'+monthEvents(cell,page).length+itemUnit" @click="select(cell.date)">另 {{ monthEvents(cell,page).length-1 }} {{ itemUnit }}</button>
               </div>
               <div v-else class="cal-cell blank" aria-hidden="true"></div>
             </template>
@@ -193,19 +194,19 @@
           <span v-if="visible&&page!=='current'&&!monthReady(page)" class="month-preview-state">日程待加载</span>
           </template>
           </page-deck>
-          <div v-if="calendarLoading||calendarSyncing||calendarError" class="calendar-state" :class="{'is-error':calendarError}" role="status" aria-live="polite"><template v-if="calendarLoading||calendarSyncing"><span class="loading-dot" aria-hidden="true"></span><span>{{ calendarSyncing ? '正在同步 '+calTitle+' 的开庭日程…' : '正在加载 '+calTitle+' 的开庭日程…' }}</span></template><template v-else><span>{{ calTitle }}的日程加载失败：{{ calendarError }}</span><button class="mini-btn" @click="loadCalendar(true)">重试</button></template></div>
+          <div v-if="calendarLoading||calendarSyncing||calendarError" class="calendar-state" :class="{'is-error':calendarError}" role="status" aria-live="polite"><template v-if="calendarLoading||calendarSyncing"><span class="loading-dot" aria-hidden="true"></span><span>{{ (calendarSyncing ? '正在同步 ' : '正在加载 ')+calTitle+(cal.showDates?' 的日期项…':' 的开庭日程…') }}</span></template><template v-else><span>{{ calTitle }}的日程加载失败：{{ calendarError }}</span><button class="mini-btn" @click="loadCalendar(true)">重试</button></template></div>
         </div>
         <div class="cal-legend"><span class="lg"><i class="dot st-in"></i>在办</span><span class="lg"><i class="dot st-done"></i>结案</span><span class="lg"><i class="dot st-pend"></i>结案未整卷</span><span class="lg"><i class="cal-holiday-tag">休</i>法定节假日</span><span class="lg"><i class="cal-holiday-tag work">班</i>调休上班</span><span class="cal-legend-note">点击日程打开案件</span></div>
       </section>
-      <aside class="cal-detail" tabindex="-1" aria-label="选中日期的开庭安排" :aria-busy="calendarLoading">
-        <div class="cal-detail-head"><p class="cal-eyebrow">当日安排<span v-if="cal.sel===today" class="cal-today-pill">今天</span></p><h3 class="detail-title">{{ detailTitle }}</h3><span class="cal-day-count" v-if="!calendarUnavailable">{{ dayHearings.length }} 场开庭<span v-if="calendarSyncing"> · 同步中</span></span></div>
+      <aside class="cal-detail" tabindex="-1" :aria-label="cal.showDates?'选中日期的日期项':'选中日期的开庭安排'" :aria-busy="calendarLoading">
+        <div class="cal-detail-head"><p class="cal-eyebrow">当日安排<span v-if="cal.sel===today" class="cal-today-pill">今天</span></p><h3 class="detail-title">{{ detailTitle }}</h3><span class="cal-day-count" v-if="!calendarUnavailable">{{ agendaSummary }}<span v-if="calendarSyncing"> · 同步中</span></span></div>
         <p class="cal-holiday-note" v-if="selectedHoliday"><span class="cal-holiday-tag" :class="{work:!selectedHoliday.isOffDay}">{{ selectedHoliday.isOffDay?'休':'班' }}</span><span>{{ selectedHoliday.name }}{{ selectedHoliday.isOffDay?' · 法定节假日':' · 调休上班' }}</span></p>
         <div class="cal-agenda" aria-live="polite">
           <loading-skeleton v-if="calendarLoading" :rows="2" label="正在加载当日安排"></loading-skeleton>
           <div class="cal-day-empty" v-else-if="calendarError"><span class="cal-empty-icon" aria-hidden="true">…</span><h4>暂时无法显示安排</h4><p>请重试本月日程读取</p></div>
-          <div class="cal-day-empty" v-else-if="!dayHearings.length"><svg class="cal-empty-icon" viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="9" y="12" width="30" height="29" rx="5" stroke="currentColor" stroke-width="1.5"/><path d="M9 21h30M17 8v8M31 8v8M19 30l4 4 7-8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><h4>这一天没有开庭安排</h4><p>选择其他日期，查看当天日程</p></div>
-          <article class="cal-agenda-item" v-for="h in dayHearings" :key="h.line_id" :class="statusClass(h.状态)">
-            <div class="cal-agenda-time"><i class="dot" :class="statusClass(h.状态)"></i><time>{{ h.时间||'时间待定' }}</time><status-badge :st="h.状态"></status-badge></div>
+          <div class="cal-day-empty" v-else-if="!dayItems.length"><svg class="cal-empty-icon" viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="9" y="12" width="30" height="29" rx="5" stroke="currentColor" stroke-width="1.5"/><path d="M9 21h30M17 8v8M31 8v8M19 30l4 4 7-8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><h4>{{ cal.showDates?'这一天没有日期项':'这一天没有开庭安排' }}</h4><p>选择其他日期，查看当天日程</p></div>
+          <article class="cal-agenda-item" v-for="h in dayItems" :key="h.line_id" :class="itemClass(h)">
+            <div class="cal-agenda-time"><i class="dot" :class="itemClass(h)"></i><time>{{ h.时间||(h.类型?'全天':'时间待定') }}</time><span v-if="h.类型" class="cal-item-kind">{{ h.类型 }}</span><status-badge :st="h.状态"></status-badge></div>
             <a class="cal-agenda-case" href="#" @click.prevent="openCase(h.path)">{{ h.案件 }}<span aria-hidden="true">↗</span></a><p class="cal-agenda-text">{{ h.文本 }}</p>
           </article>
         </div>

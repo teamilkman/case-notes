@@ -5,6 +5,7 @@ import {createPersistentCache,type PersistentCache} from '../public/persistent-c
 import {createReadCache,withSignal} from '../public/read-cache.js';
 import {createSessionAccess} from '../public/session-access.js';
 import Dexie from '../public/web/vendor/dexie.mjs';
+import {createPager} from '../public/paging.js';
 
 const session=(scope='session-a',expires=Date.now()+86400_000)=>({cache_scope:scope,expires_at:new Date(expires).toISOString()});
 const options=()=>({name:'test-'+crypto.randomUUID(),dependencies:{indexedDB,IDBKeyRange}});
@@ -273,4 +274,52 @@ test('a verified token change fences a late write made under the previous token'
   await a.write('q','late',late.token);
   assert.equal((await b.read('q'))?.hit,false);
   assert.equal((await a.read('q'))?.hit,false); // the fenced write stored nothing
+});
+
+test('online foreground verification invalidates memory only when the workspace changes and removes completed cached TODOs',async t=>{
+  const store=createPersistentCache(options());t.after(()=>store.close());let token='v1',refreshes=0,loads=0;
+  await store.activate({...session(),change_token:token});
+  await put(store,'todos',{items:[{id:'completed-on-other-device'}],matched_count:1,has_more:false,next_cursor:null});
+  const state={offline:false},access=createSessionAccess({persistence:store,state,
+    verify:async()=>({...session(),source:'web',change_token:token}),onVerified:()=>{refreshes++;cache.invalidate(false);}});
+  const cache=createReadCache(undefined,128,store,()=>access.ensure());
+  const read=()=>cache.entry('todos').ensure(async()=>{loads++;return {items:[],matched_count:0,has_more:false,next_cursor:null};});
+  await access.ensure();await read();assert.equal(loads,0);assert.equal(refreshes,0);
+  token='v2';await access.ensure(true);assert.equal(refreshes,1);assert.equal(state.offline,false);
+  const pager=createPager(read,undefined,async()=>{const r=await store.read('todos');return r?.hit?r.data:r?.stale;});
+  await pager.reset();assert.deepEqual(pager.items,[]);assert.equal(loads,1);
+  await access.ensure(true);await read();assert.equal(refreshes,1);assert.equal(loads,1);
+});
+
+test('a cache hit is rechecked after session validation before it can finish as current',async t=>{
+  const store=createPersistentCache(options());t.after(()=>store.close());await store.activate({...session(),change_token:'v1'});await put(store,'q','old');
+  let verified=false,loads=0;
+  const entry=createReadCache(undefined,128,store,async()=>{await store.activate({...session(),change_token:'v2'});verified=true;}).entry('q');
+  assert.equal(await entry.ensure(async()=>{assert.equal(verified,true);loads++;return 'fresh';}),'fresh');
+  assert.equal(loads,1);await store.flush();assert.equal((await store.read('q'))?.data,'fresh');
+});
+
+test('manual revalidation keeps offline copies, fences old responses and refreshes even with an unchanged workspace token',async t=>{
+  const state={offline:false},store=createPersistentCache({...options(),isOffline:()=>state.offline});t.after(()=>store.close());
+  await store.activate({...session(),change_token:'v1'});await put(store,'q','old');const old=(await store.read('q'))!;
+  await store.revalidate();assert.equal((await store.read('q'))?.hit,false);assert.equal((await store.read('q'))?.stale,'old');
+  await store.write('q','late',old.token);state.offline=true;assert.equal((await store.read('q'))?.data,'old');state.offline=false;
+  const cache=createReadCache(undefined,128,store);
+  assert.equal(await cache.entry('q').ensure(async()=>{throw networkError();}),'old');
+  assert.equal((await store.read('q'))?.hit,false);cache.invalidate(false);
+  assert.equal(await cache.entry('q').ensure(async()=>'fresh'),'fresh');await store.flush();assert.equal((await store.read('q'))?.hit,true);
+});
+
+test('a late network result cannot borrow a newer persistence token to mark old data fresh',async t=>{
+  const config=options(),a=createPersistentCache(config),b=createPersistentCache(config);t.after(()=>{a.close();b.close();});
+  await a.activate({...session(),change_token:'v1'});await b.activate({...session(),change_token:'v1'});let finish:any;
+  const job=createReadCache(undefined,128,a).entry('q').ensure(()=>new Promise(resolve=>{finish=resolve;}));
+  while(!finish)await new Promise(resolve=>setImmediate(resolve));
+  await b.activate({...session(),change_token:'v2'});finish('late-v1');await job;await a.flush();
+  assert.equal((await b.read('q'))?.hit,false);assert.equal((await b.read('q'))?.stale,undefined);
+});
+
+test('a session response without a workspace token cannot preserve an old proof of freshness',async t=>{
+  const store=createPersistentCache(options());t.after(()=>store.close());await store.activate({...session(),change_token:'v1'});await put(store,'q','old');
+  await store.activate(session());assert.equal((await store.read('q'))?.hit,false);assert.equal((await store.read('q'))?.stale,'old');
 });

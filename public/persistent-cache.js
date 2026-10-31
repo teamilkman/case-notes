@@ -24,7 +24,7 @@ export function createPersistentCache({name='case-notes-reads-v3',isOffline=()=>
   // Reuse online requires the replica to carry the verified current token; a
   // replica from another generation, or none at all, is a miss that stays on
   // disk for offline reading instead of being deleted.
-  const fresh=(state,row)=>isOffline()||(!!state.changeToken&&row.change===state.changeToken);
+  const fresh=(state,row)=>isOffline()||(!!state.changeToken&&row.change===state.changeToken&&(row.refreshEpoch??0)===(state.refreshEpoch??0));
   const safe=(job,maintenance=false)=>enqueue(async()=>{if(disabled&&!maintenance)return null;try{return await job();}catch{disabled=true;markDirty(true);return null;}});
   async function remove(row,state){await db.responses.delete(row.key);state.bytes-=row.bytes;}
   async function legacyExists(){
@@ -67,17 +67,19 @@ export function createPersistentCache({name='case-notes-reads-v3',isOffline=()=>
       return safe(async()=>{await importLegacy();return transaction(async()=>{
         const previous=await db.control.get('active');
         if(!scope||!Number.isFinite(expiresAt)||expiresAt<=now()){scope=null;return;}
-        const changeToken=session.change_token??previous?.changeToken??null;
+        const changeToken=session.change_token??null;
         if(previous?.scope!==scope||dirty()){
           await db.responses.clear();
           await db.control.put({id:'active',scope,expiresAt,epoch:(previous?.epoch||0)+1,bytes:0,changeToken});
           markDirty(false);
+          return {changed:!!previous?.scope};
         }else{
           // Verified against the server: an unchanged token keeps replicas
           // usable, a newer one fences them for revalidation while keeping them
           // for offline reading, and a token on either side alone is adopted.
-          const changed=!!previous.changeToken&&!!changeToken&&previous.changeToken!==changeToken;
+          const changed=(previous.changeToken??null)!==changeToken;
           await db.control.put({...previous,expiresAt,changeToken,epoch:changed?(previous.epoch||0)+1:(previous.epoch||0)});
+          return {changed};
         }
       });},true);
     },
@@ -112,11 +114,17 @@ export function createPersistentCache({name='case-notes-reads-v3',isOffline=()=>
           ||(token.change??null)!==(state.changeToken??null))return;
         const old=await db.responses.get(key);if(old)await remove(old,state);
         const savedAt=now();
-        await db.responses.put({key,data:copy,bytes,savedAt,change:state.changeToken??null});state.bytes+=bytes;
+        await db.responses.put({key,data:copy,bytes,savedAt,change:state.changeToken??null,refreshEpoch:state.refreshEpoch??0});state.bytes+=bytes;
         let count=await db.responses.count();
         while(count>maxEntries||state.bytes>maxBytes){const row=await db.responses.orderBy('savedAt').first();if(!row)break;await remove(row,state);count--;}
         await db.control.put(state);
       }));
+    },
+    revalidate(){
+      return safe(()=>transaction(async()=>{
+        const state=await db.control.get('active');if(!matches(state)||isOffline())return;
+        await db.control.put({...state,epoch:(state.epoch||0)+1,refreshEpoch:(state.refreshEpoch||0)+1});
+      }),true);
     },
     invalidate(key){
       return safe(()=>transaction(async()=>{

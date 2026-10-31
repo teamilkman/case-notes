@@ -3,7 +3,7 @@
 // Offline judgement happens after the cache: a stale replica is displayed with a
 // loading state first; a successful network read completes it, while a network or
 // offline-auth failure keeps the existing offline copy.
-export function createReadCache(wrap=value=>value,maxEntries=128,persistence=null){
+export function createReadCache(wrap=value=>value,maxEntries=128,persistence=null,validate=async()=>{}){
   const entries=new Map();
   function trim(protectedKey){while(entries.size>maxEntries){const candidate=[...entries].find(([key,entry])=>key!==protectedKey&&!entry.loading);if(!candidate)break;entries.delete(candidate[0]);}}
   const offlineError=error=>['NETWORK_UNAVAILABLE','OFFLINE_AUTH_REQUIRED'].includes(error?.code);
@@ -13,12 +13,16 @@ export function createReadCache(wrap=value=>value,maxEntries=128,persistence=nul
       if(entries.has(key)){const value=entries.get(key);entries.delete(key);entries.set(key,value);return value;}
       const value=wrap({data:null,loaded:false,loading:false,error:'',pending:null,sequence:0,
         ensure(load){
-          if(this.loaded)return Promise.resolve(this.data);
           if(this.pending)return this.pending;
+          if(this.loaded)return Promise.resolve(this.data);
           this.loading=true;this.error='';const sequence=++this.sequence;
           let token,fromPersistence=false;
           const read=persistence?async()=>{
-            const stored=await persistence.read(key);token=stored?.token;fromPersistence=!!stored?.hit;
+            let stored=await persistence.read(key);
+            if(sequence!==this.sequence)throw new DOMException('Aborted','AbortError');
+            if(stored?.hit||stored?.stale!==undefined){this.data=stored.hit?stored.data:stored.stale;this.loaded=true;}
+            await validate();
+            stored=await persistence.read(key);token=stored?.token;fromPersistence=!!stored?.hit;
             if(sequence!==this.sequence)throw new DOMException('Aborted','AbortError');
             if(stored?.hit)return stored.data;
             const stale=stored?.stale;
@@ -42,6 +46,7 @@ export function createReadCache(wrap=value=>value,maxEntries=128,persistence=nul
                 fromPersistence=true;return data;
               }
             }
+            this.data=null;this.loaded=false;
             try{return await load();}catch(error){
               if(error?.name==='AbortError'||!offlineError(error))throw error;
               const fallback=await persistence.read(key);
@@ -54,10 +59,7 @@ export function createReadCache(wrap=value=>value,maxEntries=128,persistence=nul
           this.pending=Promise.resolve().then(read).then(async data=>{if(sequence===this.sequence){this.data=data;this.loaded=true;
             if(persistence&&!fromPersistence){
               try{
-                const latest=await persistence.read(key);
-                if(sequence!==this.sequence)return data;
-                if(latest?.token)void persistence.write(key,data,latest.token);
-                else if(token)void persistence.write(key,data,token);
+                if(token)void persistence.write(key,data,token);
               }catch{}
             }
           }return data;})

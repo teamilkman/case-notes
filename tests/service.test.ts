@@ -356,6 +356,34 @@ test('browser schedules preserve future/history ordering and calendar counts inc
   const month:any=await webRead(env,web,'schedules',{mode:'future',today:'0001-01-01',from_date:'2026-10-01',to_date:'2026-10-31'});assert.equal(month.data.items.filter((x:any)=>x.case_id===cid).length,4);
 });
 
+test('calendar date items page by effective date without duplicating hearings or leaking other workspaces',async()=>{
+  const principal={...ai,workspaceId:'calendar-dates'},browser={...web,workspaceId:principal.workspaceId};
+  const make=async(name:string,kind='case')=>(await call('cases_create',{name,kind,request_key:key()},principal) as any).data.case_id;
+  const active=await make('日期项案件'),archived=await make('归档日期项'),affair=await make('事务日期项','affair');
+  const text=['2026.10.01 记录首日','[x] 2026.10.31 18:00 完成记录','[ ] 2026.09.01 待办 #截止2026.10.15 09:00',
+    '[ ] 2026.10.02 无期限待办','[ ] 2026.10.03 下月截止 #截止2026.11.01','[ ] 无日期待办',
+    '📅 2026.10.15 10:00 案件开庭','2026.09.30 月外记录','2026.10.10 删除记录','2026.10.11 失效索引','📅 2026.10.12 25:00 无效日程'];
+  await call('lines_add',{case_ref:active,text:text.join('\n'),request_key:key()},principal);
+  const doc:any=(await call('cases_get',{case_ref:active},principal) as any).data;
+  await call('lines_delete',{case_ref:active,line_id:doc.lines[8].line_id,expected_line_version:1,request_key:key()},principal);
+  await env.DB.prepare('UPDATE line_index SET source_line_version=0 WHERE line_id=?').bind(doc.lines[9].line_id).run();
+  await call('lines_add',{case_ref:archived,text:'2026.10.20 归档记录',request_key:key()},principal);
+  await call('cases_update',{case_ref:archived,expected_metadata_version:1,fields:{status:'结案'},request_key:key()},principal);
+  await call('lines_add',{case_ref:affair,text:'📅 2026.10.21 14:00 事务安排\n[ ] 事务待办 #截止2026.10.22',request_key:key()},principal);
+  await call('lines_add',{case_ref:await create('其他工作区日期'),text:'2026.10.23 不可泄漏',request_key:key()});
+  const args={from_date:'2026-10-01',to_date:'2026-10-31',limit:2},rows:any[]=[];
+  let page:any=await webRead(env,browser,'calendar-dates',args);
+  assert.equal(page.data.matched_count,7);assert.equal(page.data.has_more,true);
+  await assert.rejects(webRead(env,browser,'calendar-dates',{...args,to_date:'2026-11-01',cursor:page.data.next_cursor}),/分页条件已改变/);
+  while(true){rows.push(...page.data.items);if(!page.data.has_more)break;page=await webRead(env,browser,'calendar-dates',{...args,cursor:page.data.next_cursor});}
+  assert.deepEqual(rows.map(r=>r.calendar_date),['2026-10-01','2026-10-02','2026-10-15','2026-10-20','2026-10-21','2026-10-22','2026-10-31']);
+  assert.equal(new Set(rows.map(r=>r.line_id)).size,7);assert.equal(rows[2].calendar_time,'09:00');assert.equal(rows[2].date,'2026-09-01');
+  assert.equal(rows[3].case_status,'结案');assert.equal(rows[4].case_kind,'affair');assert.equal(rows[6].kind,'completed');
+  await assert.rejects(webRead(env,principal,'calendar-dates',args),/此接口用于网页/);
+  await assert.rejects(webRead(env,browser,'calendar-dates',{...args,from_date:'2026-10-32'}),/参数格式不正确/);
+  await assert.rejects(webRead(env,browser,'calendar-dates',{...args,from_date:'2026-11-01'}),/参数格式不正确/);
+});
+
 test('collapsed activity stats match both paged windows and exclude deleted, stale and out-of-scope lines',async()=>{
   const principal={...ai,workspaceId:'activity-stats'},browser={...web,workspaceId:principal.workspaceId};
   const make=async(name:string,kind='case')=>{

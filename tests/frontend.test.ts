@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {legacyView,save,createCase,pendingCreate,updateCase,pendingMetadata,changeMetadata,complete,feed,invalidateReads,beginEdit,changeEdit,restoreDraft,logout} from '../public/db-adapter.js';
+import {legacyView,save,createCase,pendingCreate,updateCase,pendingMetadata,changeMetadata,complete,feed,invalidateReads,beginEdit,changeEdit,restoreDraft,logout,calendar,readCalendar,calendarDateItem} from '../public/db-adapter.js';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {parseLine} from '../src/parser';
@@ -556,6 +556,44 @@ test('calendar month links normalize missing, invalid and out-of-month selection
   ui.context.location.hash='#/calendar/2024-02/2024-02-29';vm.runInNewContext('parseHash()',ui.context);assert.equal(ui.state.cal.sel,'2024-02-29');
 });
 
+test('calendar optional dates load only on selection, collect every page and reuse base and expanded months',async()=>{
+  const before=globalThis.fetch,calls:string[]=[];invalidateReads();
+  globalThis.fetch=async(path,options)=>{
+    const name=String(path).split('/').at(-1)!,args=JSON.parse(String(options?.body));calls.push(name);
+    if(name==='calendar-counts')return Response.json({ok:true,data:{items:[{date:'2026-10-15',count:1}]}});
+    if(name==='schedules')return Response.json({ok:true,data:{items:[{line_id:'hearing'}],has_more:false}});
+    assert.equal(name,'calendar-dates');assert.equal(args.from_date,'2026-10-01');assert.equal(args.to_date,'2026-10-31');
+    return Response.json({ok:true,data:{items:[{line_id:args.cursor?'record':'todo'}],has_more:!args.cursor,next_cursor:args.cursor?null:'next'}});
+  };
+  try{
+    await readCalendar(2026,9);assert.deepEqual(calls.sort(),['calendar-counts','schedules']);
+    const [a,b]=await Promise.all([readCalendar(2026,9,true),readCalendar(2026,9,true)]);
+    assert.equal(a,b);assert.deepEqual(a.datedItems.map((r:any)=>r.line_id),['todo','record']);assert.deepEqual(a.items,[{line_id:'hearing'}]);
+    assert.equal(calls.length,4);assert.equal(a.dateCounts['2026-10-15'],1);
+    await readCalendar(2026,9);await readCalendar(2026,9,true);assert.equal(calls.length,4);
+    assert.notEqual(calendar(2026,9),calendar(2026,9,true));
+  }finally{globalThis.fetch=before;invalidateReads();}
+});
+
+test('calendar filters supplement dates in both month previews and agenda while hearing statistics stay separate',()=>{
+  const ui=uiHarness(),component=ui.components['calendar-view'];
+  ui.context.DB.eventItem=(r:any)=>({...r,日期:r.event_date,时间:r.event_time});ui.context.DB.calendarDateItem=calendarDateItem;
+  const hearing={line_id:'hearing',event_date:'2026-10-15',event_time:'10:00'},todo={line_id:'todo',kind:'todo',calendar_date:'2026-10-15',calendar_time:'09:00',case_kind:'case',display_text:'准备材料'};
+  const data={items:[hearing],datedItems:[todo,{...todo,line_id:'record',kind:'completed',calendar_time:null}]};
+  const view:any={...component.methods,cal:{showDates:false,sel:'2026-10-15'},calendarEntry:{data},D:{},calendarUnavailable:false};
+  Object.defineProperty(view,'byDate',{get:()=>component.computed.byDate.call(view)});
+  Object.defineProperty(view,'visibleByDate',{get:()=>component.computed.visibleByDate.call(view)});
+  view.$state={cal:view.cal};
+  assert.equal(ui.state.cal.showDates,false);assert.equal(component.computed.dayItems.call(view).length,1);
+  view.cal.showDates=true;
+  assert.deepEqual(Array.from(component.computed.dayItems.call(view),(r:any)=>r.line_id),['todo','hearing','record']);
+  assert.equal(component.computed.dayHearings.call(view).length,1);assert.equal(component.computed.monthSummary.call(view).hearings,1);
+  assert.equal(view.itemTime(view.visibleByDate.get('2026-10-15')[2]),'全天');
+  ui.context.DB.calendar=()=>({loaded:true,data});
+  assert.equal(view.monthEvents({date:'2026-10-15'},'next').length,3);
+  view.cal.showDates=false;assert.equal(view.monthEvents({date:'2026-10-15'},'next').length,1);
+});
+
 function calendarHarness(){
   // Like Vue, wrap assigned data so the stored value has a different identity
   // from the raw value returned by the first in-flight read.
@@ -563,9 +601,9 @@ function calendarHarness(){
   const ui=uiHarness(),cache=createReadCache(wrap),requests:string[]=[],timers:(()=>void)[]=[];
   const pending=new Map<string,{resolve:(data:any)=>void,reject:(error:Error)=>void}>();
   ui.context.setTimeout=(fn:()=>void)=>{timers.push(fn);};
-  ui.context.DB.calendar=(y:number,m:number)=>cache.entry(`${y}-${m}`);
-  ui.context.DB.readCalendar=async(y:number,m:number)=>{await Promise.resolve();return cache.entry(`${y}-${m}`).ensure(()=>{
-    const key=`${y}-${m}`;requests.push(key);
+  ui.context.DB.calendar=(y:number,m:number,dates=false)=>cache.entry(`${y}-${m}${dates?':dates':''}`);
+  ui.context.DB.readCalendar=async(y:number,m:number,dates=false)=>{await Promise.resolve();const key=`${y}-${m}${dates?':dates':''}`;return cache.entry(key).ensure(()=>{
+    requests.push(key);
     return new Promise((resolve,reject)=>{pending.set(key,{resolve,reject});});
   });};
   ui.context.DB.feed=()=>({ensure:async()=>{}});
@@ -574,6 +612,15 @@ function calendarHarness(){
   const finish=(key:string)=>pending.get(key)!.resolve({items:[],dateCounts:{[key]:1}});
   return {...ui,cache,requests,timers,pending,component,view,finish};
 }
+
+test('a late expanded month cannot replace the default calendar after unchecking dates',async()=>{
+  const ui=calendarHarness(),{y,m}=ui.state.cal,key=`${y}-${m}`;
+  const base=ui.view.loadCalendar();await flushUi();ui.finish(key);await base;
+  ui.state.cal.showDates=true;const expanded=ui.view.loadCalendar();await flushUi();
+  ui.state.cal.showDates=false;await ui.view.loadCalendar();const selected=ui.view.calendarEntry;
+  ui.finish(key+':dates');await expanded;
+  assert.equal(ui.view.calendarEntry,selected);assert.equal(ui.view.calendarEntry,ui.cache.entry(key));
+});
 
 test('calendar prefetch waits for the month and first screen, loads only six neighbours across years and shares visible reads',async()=>{
   const ui=calendarHarness(),{y,m}=ui.state.cal,key=`${y}-${m}`;
@@ -790,9 +837,16 @@ test('a late case read cannot claim the revision of a newer write',async()=>{
 test('a statistics failure from before a write does not replace the fresh loading state',async()=>{
   const ui=uiHarness();let fail:(error:Error)=>void=()=>{},finish:(result:any)=>void=()=>{};let reads=0;
   ui.context.DB.web=()=>++reads===1?new Promise((_r,reject)=>{fail=reject;}):new Promise(resolve=>{finish=resolve;});
-  const pending=ui.context.loadStats();ui.context.changed();fail(new Error('旧请求失败'));await pending;await flushUi();
+  const pending=ui.context.loadStats();ui.context.changed();fail(new Error('旧请求失败'));await flushUi();
   assert.equal(ui.state.statsError,'');assert.equal(ui.state.statsLoading,true);assert.equal(reads,2);
-  finish({counts:{todos:0}});await flushUi();assert.equal(ui.state.counts.todos,0);assert.equal(ui.state.statsLoading,false);
+  finish({counts:{todos:0}});await pending;await flushUi();assert.equal(ui.state.counts.todos,0);assert.equal(ui.state.statsLoading,false);
+});
+
+test('a delayed local statistics preview cannot overwrite a completed fresh response',async()=>{
+  const ui=uiHarness();let finish:any;
+  ui.context.DB.peek=()=>new Promise(resolve=>{finish=resolve;});ui.context.DB.web=async()=>({counts:{todos:0}});
+  await ui.context.loadStats();finish({counts:{todos:9}});await flushUi();
+  assert.equal(ui.state.counts.todos,0);assert.equal(ui.state.statsLoading,false);
 });
 
 test('calendar write invalidation fences a late month response while async session validation still updates counts',async()=>{

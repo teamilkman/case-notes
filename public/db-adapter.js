@@ -68,21 +68,47 @@ export function legacyView(cases,rows){
 const wrap=value=>typeof window!=='undefined'&&window.Vue?window.Vue.reactive(value):value;
 const connection=wrap({offline:typeof navigator!=='undefined'&&navigator.onLine===false,authRequired:false,reconnecting:false,error:'',syncing:typeof window!=='undefined'});
 const persistent=typeof window!=='undefined'?createPersistentCache({isOffline:()=>connection.offline}):null;
-const reads=createReadCache(wrap,128,persistent),feeds=new Map();let readEpoch=0,privateClosed=false;
+const reads=createReadCache(wrap,128,persistent,()=>ensureSession()),feeds=new Map();let readEpoch=0,privateClosed=false,syncJob=null,reconnectJob=null,manualRefreshJob=null,syncSequence=0;
+function notifyReadChange(){
+  const sequence=++syncSequence,detail={pending:[]};connection.syncing=true;
+  window.dispatchEvent(new CustomEvent('case-notes:reconnected',{detail}));
+  syncJob=Promise.allSettled(detail.pending).finally(()=>{if(sequence===syncSequence){connection.syncing=false;syncJob=null;}});
+  return syncJob;
+}
 const sessionAccess=persistent?createSessionAccess({persistence:persistent,state:connection,
   verify:async()=>{const session=await request('/api/session',null,'GET');migrateSessionStorage();await removePreviousReadCache();
     // Best effort: the browser decides whether to protect this origin from eviction.
     if(navigator.storage?.persist)void navigator.storage.persist().catch(()=>{});
     return session;},
-  onVerified:()=>{invalidateReads(undefined,false);window.dispatchEvent(new Event('case-notes:reconnected'));},
+  onVerified:()=>{invalidateReads(undefined,false);void notifyReadChange();},
   onUnauthorized:async()=>{try{await clearPrivate();}finally{location.replace(appLocation('login.html'));}},
 }):null;
 const ensureSession=()=>sessionAccess?sessionAccess.ensure():Promise.resolve();
-async function reconnect(){
-  if(privateClosed||connection.reconnecting)return;
+function reconnect(){
+  if(privateClosed)return Promise.resolve();
+  if(reconnectJob)return reconnectJob;
   connection.reconnecting=true;connection.error='';
-  try{await sessionAccess?.ensure(true);}catch(error){connection.error=error.message;}
-  finally{connection.reconnecting=false;}
+  reconnectJob=(async()=>{
+    try{await sessionAccess?.ensure(true);if(syncJob)await syncJob;}catch(error){connection.error=error.message;}
+    finally{connection.reconnecting=false;reconnectJob=null;}
+  })();return reconnectJob;
+}
+export function refreshData(){
+  if(privateClosed)return Promise.resolve(false);
+  if(manualRefreshJob)return manualRefreshJob;
+  manualRefreshJob=(async()=>{
+    const epoch=readEpoch;
+    await reconnect();
+    if(privateClosed||connection.offline||connection.error)return false;
+    if(epoch!==readEpoch)return true;
+    // A deliberate refresh also checks copies whose workspace token is unchanged.
+    // Keep their payloads for offline fallback, but fence late writers and reuse.
+    await persistent?.revalidate();
+    if(privateClosed)return false;
+    invalidateReads(undefined,false);
+    await notifyReadChange();
+    return !connection.offline&&!connection.error;
+  })().finally(()=>{manualRefreshJob=null;});return manualRefreshJob;
 }
 // Foreground resume revalidates once per focus with a short guard so rapid app
 // switches do not queue requests; verification shares the session, only an
@@ -108,21 +134,15 @@ if(persistent)void persistent.resumeOffline().catch(()=>{});
 void (async()=>{
   if(!persistent||typeof window==='undefined')return;
   try{
-    const before=(await persistent.read('__cold_probe__'))?.token;
     await ensureSession();
-    connection.syncing=false;
-    const after=(await persistent.read('__cold_probe__'))?.token;
-    const changed=!before||!after||before.scope!==after.scope||before.epoch!==after.epoch||(before.change??null)!==(after.change??null);
-    if(before&&after&&changed){
-      invalidateReads(undefined,false);
-      window.dispatchEvent(new Event('case-notes:reconnected'));
-    }
-  }catch{connection.syncing=false;}
+    if(syncJob)await syncJob;
+  }catch{}finally{if(!syncJob)connection.syncing=false;}
 })();
 if(typeof window!=='undefined'){
   window.addEventListener('offline',()=>{connection.offline=true;});
   window.addEventListener('online',reconnect);
   window.addEventListener('focus',resume);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')resume();});
 }
 const cacheKey=(name,args)=>name+':'+JSON.stringify(Object.fromEntries(Object.entries(args).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b))));
 // Cache first, offline judgement after: the persistent stale replica is displayed
@@ -157,7 +177,7 @@ export function feed(name,args={}){
           while(generation===this.generation&&!refreshed.error&&refreshed.hasMore&&refreshed.items.length<count)await next();
           if(generation!==this.generation)return;
           if(refreshed.error){this.error=refreshed.error;this.epoch=-1;return;}
-          for(const field of ['items','total','cursor','hasMore','loadedAt'])this[field]=refreshed[field];
+          for(const field of ['items','total','cursor','hasMore','loadedAt','preview'])this[field]=refreshed[field];
         })().finally(()=>{if(generation===this.generation){this.loading=false;this.pending=null;this.refreshJob=null;}});
         this.pending=this.refreshJob;
         return this.refreshJob;
@@ -194,9 +214,17 @@ export function invalidateReads(savedDoc,persist=true){
 function keepFeed(value){value.epoch=readEpoch;value.loadedAt=Date.now();}
 function rememberDoc(doc){reads.entry('case:'+doc.ref).prime(doc);}
 function invalidateCase(ref){reads.entry('case:'+ref).invalidate();}
-function calendar(y,m){return reads.entry('calendar:'+y+'-'+m);}
-async function readCalendar(y,m){
-  return calendar(y,m).ensure(async()=>{
+export function calendar(y,m,includeDates=false){return reads.entry('calendar:'+y+'-'+m+(includeDates?':dates':''));}
+export async function readCalendar(y,m,includeDates=false){
+  return calendar(y,m,includeDates).ensure(async()=>{
+    if(includeDates){
+      const pad=n=>String(n).padStart(2,'0');
+      const args={from_date:y+'-'+pad(m+1)+'-01',to_date:y+'-'+pad(m+1)+'-'+pad(new Date(y,m+1,0).getDate()),limit:100};
+      const [base,first]=await Promise.all([readCalendar(y,m),web('calendar-dates',args)]);
+      let page=first;const datedItems=[...page.items];
+      while(page.has_more){page=await web('calendar-dates',{...args,cursor:page.next_cursor});datedItems.push(...page.items);}
+      return {...base,datedItems};
+    }
     await ensureSession();
     const pad=n=>String(n).padStart(2,'0');
     const args={mode:'future',today:'0001-01-01',from_date:y+'-'+pad(m+1)+'-01',to_date:y+'-'+pad(m+1)+'-'+pad(new Date(y,m+1,0).getDate()),limit:100};
@@ -209,6 +237,7 @@ async function readCalendar(y,m){
 function caseItem(c){const d=legacyView([c],[]);return [...d.案件,...d.归档,...d.事务][0];}
 function todoItem(r){return {案件:r.case_name,文本:r.display_text,行:r.sort_order,状态:r.todo_state,截止:r.due_date,截止时间:r.due_time,line_id:r.line_id,case_id:r.case_id,version:r.version};}
 function eventItem(r){return {line_id:r.line_id,案件:r.case_name,日期:r.event_date,时间:r.event_time,文本:r.display_text.replace(/^\d{4}\.\d{1,2}\.\d{1,2}(?:\s+\d{1,2}:\d{2})?\s*/,''),状态:r.case_status,path:r.case_id};}
+export function calendarDateItem(r){return {line_id:r.line_id,案件:r.case_name,日期:r.calendar_date,时间:r.calendar_time,文本:r.display_text,状态:r.case_kind==='affair'?'事务':r.case_status,path:r.case_id,类型:r.kind==='todo'?'待办':r.kind==='completed'?'已完成':r.kind==='schedule'?'日程':'记录'};}
 function activityItem(r){return {line_id:r.line_id,path:r.case_id,案件:r.case_name,状态:r.case_kind==='affair'?'事务':r.case_status,标记:r.marker,日期:r.date,时间:r.time,文本:r.display_text.replace(/^\d{4}\.\d{2}\.\d{2}(\s+\d{2}:\d{2})?\s*/,'')};}
 async function readCase(ref){
   return reads.entry('case:'+ref).ensure(async()=>{await ensureSession();const result=await all('cases_get',{case_ref:ref});return {ref,case:result.case,revision:result.document_revision,lines:result.lines,text:result.lines.map(l=>l.text).join('\n')};});
@@ -315,4 +344,4 @@ function sanitize(html){
   }
   return doc.body.innerHTML;
 }
-if(typeof window!=='undefined')window.DB={connection,reconnect,resume,web,pager,peek:peekPage,feed,calendar,readCalendar,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,changeMetadata,save,createCase,pendingCreate,updateCase,pendingMetadata,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};
+if(typeof window!=='undefined')window.DB={connection,reconnect,resume,refreshData,web,pager,peek:peekPage,feed,calendar,readCalendar,calendarDateItem,invalidateReads,keepFeed,rememberDoc,invalidateCase,caseItem,todoItem,eventItem,activityItem,legacyView,readCase,beginEdit,changeEdit,changeMetadata,save,createCase,pendingCreate,updateCase,pendingMetadata,complete,logout,sanitize,clearPrivate,restoreDraft,discardDraft};

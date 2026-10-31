@@ -2,6 +2,7 @@ import './db-adapter.js';
 import {pageDeck,MOBILE_QUERY} from './page-deck.js';
 import {createNavigation} from './navigation.js';
 import {appLocation} from './app-location.js';
+import {createPullRefresh,atScrollTop} from './pull-refresh.js';
 import {loadHolidayYear,peekHolidayYear} from './holidays.js';
 
 const { createApp, reactive } = Vue;
@@ -52,7 +53,7 @@ const state = reactive({
   D: DB.legacyView([],[]), connection:DB.connection, counts:{}, statsError:'', statsLoading:false, statsAt:0, change:0, error:'', loggingOut:false, view:'kanban', selCase:null, toast:null,
   scrolls:{},casesSearch:'',caseParent:null,pageOrder:['kanban','cases','calendar'],viewsReady:false,mobile:window.matchMedia?.(MOBILE_QUERY).matches||false,
   inApk:typeof location!=='undefined'&&typeof location.pathname==='string'&&location.pathname.indexOf('/__app__/')===0,
-  cal: (() => { const t=new Date(); return { y:t.getFullYear(), m:t.getMonth(), sel: todayStr() }; })(),
+  cal: (() => { const t=new Date(); return { y:t.getFullYear(), m:t.getMonth(), sel: todayStr(), showDates:false }; })(),
 });
 let _toastTimer = null;
 function toast(msg, kind){ state.toast={msg,kind}; clearTimeout(_toastTimer); _toastTimer=setTimeout(()=>{ state.toast=null; }, kind==='err' ? 6000 : 2600); }  // 错误提示留存久些,避免一闪而过看不清
@@ -75,12 +76,12 @@ function prepareViews(){
   if(swiper?.touchEventsData.isTouched||swiper?.animating){setTimeout(prepareViews,100);return;}
   state.viewsReady=true;
 }
-function prefetchCalendar(y,m){
-  if(!firstScreenReady||state.loggingOut||!state.D||!DB.calendar(y,m).loaded)return;
+function prefetchCalendar(y,m,includeDates=state.cal.showDates){
+  if(!firstScreenReady||state.loggingOut||!state.D||!DB.calendar(y,m,includeDates).loaded)return;
   const loads=[];
   for(const offset of [-1,1,-2,2,-3,3]){
     const date=new Date(y,m+offset,1),year=date.getFullYear(),month=date.getMonth();
-    if(!DB.calendar(year,month).error)loads.push(DB.readCalendar(year,month));
+    if(!DB.calendar(year,month,includeDates).error)loads.push(DB.readCalendar(year,month,includeDates));
   }
   // Read neighbours directly so a background completion cannot expand the range.
   Promise.allSettled(loads);
@@ -88,12 +89,13 @@ function prefetchCalendar(y,m){
 function loadStats(){
   if(statsJob)return statsJob;
   state.statsLoading=true;state.statsError='';const change=state.change;
+  let settled=false;
   const args={today:todayStr()};
   // Display cached counts at once with the loading state; the network read
   // that follows completes them, an offline failure keeps them.
-  if(DB.peek)void DB.peek('stats',args).then(cached=>{if(cached&&cached.counts&&change===state.change)state.counts=cached.counts;}).catch(()=>{});
-  statsJob=DB.web('stats',args).then(result=>{if(change===state.change){state.counts=result.counts;state.statsAt=Date.now();}})
-    .catch(e=>{if(change===state.change)state.statsError=e.message;}).finally(()=>{state.statsLoading=false;statsJob=null;if(change!==state.change)loadStats();});
+  if(DB.peek)void DB.peek('stats',args).then(cached=>{if(!settled&&cached&&cached.counts&&change===state.change)state.counts=cached.counts;}).catch(()=>{});
+  statsJob=DB.web('stats',args).then(result=>{settled=true;if(change===state.change){state.counts=result.counts;state.statsAt=Date.now();}})
+    .catch(e=>{settled=true;if(change===state.change)state.statsError=e.message;}).finally(()=>{state.statsLoading=false;statsJob=null;if(change!==state.change)return loadStats();});
   return statsJob;
 }
 function changed(savedDoc){DB.invalidateReads(savedDoc);state.change++;state.statsAt=0;loadStats();}
@@ -153,10 +155,15 @@ function updateTitle(){if(typeof document!=='undefined')document.title='案记 �
 window.addEventListener('hashchange', parseHash);
 parseHash();
 window.CaseNotesNavigation={back:()=>navigation.back()};
-window.addEventListener('case-notes:reconnected',()=>{state.change++;state.statsAt=0;loadStats();viewControllers[state.view]?.refresh();});
+window.addEventListener('case-notes:reconnected',event=>{
+  state.change++;state.statsAt=0;
+  const jobs=[loadStats(),viewControllers[state.view]?.refresh()];
+  event?.detail?.pending?.push(...jobs);
+});
 
 const app = createApp({
   template:'#app-tpl',
+  data(){return {pull:{distance:0,ready:false,refreshing:false}};},
   computed:{
     D(){ return this.$state.D; },
     futureCount(){return this.$state.counts.future??'-';},
@@ -166,6 +173,10 @@ const app = createApp({
   methods:{
     loadStats,
     reconnect:()=>{if(DB.connection.authRequired){location.assign(appLocation('login.html')+location.hash);return;}return DB.reconnect();},
+    pullStart(event){this.pullGesture?.start(event);},
+    pullMove(event){this.pullGesture?.move(event);},
+    pullEnd(event){return this.pullGesture?.end(event);},
+    pullCancel(){this.pullGesture?.cancel();},
     // APK manual update entry (no JS bridge): a same-host sentinel navigation is
     // consumed by the shell, which runs the check and reports back natively.
     checkUpdate:()=>{location.assign('https://'+location.host+'/__app__/check-update');},
@@ -199,8 +210,15 @@ const app = createApp({
     this.mobileMedia=window.matchMedia(MOBILE_QUERY);
     this.mobileChanged=()=>{state.mobile=this.mobileMedia.matches;};
     this.mobileMedia.addEventListener('change',this.mobileChanged);
+    this.pullGesture=createPullRefresh({
+      canStart:event=>state.mobile&&!this.swipeLocked&&!state.loggingOut&&!viewControllers.kanban?.submitting
+        &&!event.target.closest('input,textarea,select,[contenteditable],.dlg-mask,.cal-month-picker,.hm-wrap,[data-swipe-ignore],[inert]')
+        &&atScrollTop(event.target,this.$el),
+      refresh:async()=>{if(!await DB.refreshData())toast('未能同步，已保留本地副本和草稿。','err');},
+      onChange:value=>{this.pull=value;},onError:error=>toast('刷新未完成：'+error.message,'err'),
+    });
   },
-  beforeUnmount(){this.mobileMedia?.removeEventListener('change',this.mobileChanged);},
+  beforeUnmount(){this.mobileMedia?.removeEventListener('change',this.mobileChanged);this.pullGesture?.dispose();},
 });
 app.component('page-deck',pageDeck);
 app.config.globalProperties.$state = state;
@@ -355,7 +373,7 @@ app.component('cases-view', {
       await this.$nextTick();await this.loadMd();
       if(this.$state.selCase===receipt.case_id&&!this.mdErr){await this.enterEdit();this.$nextTick(()=>this.$refs.editor?.focus({preventScroll:true}));}
     },
-    refresh(){viewControllers.cases=this;if(this.seenChange!==this.$state.change){this.seenChange=this.$state.change;this.loadList();if(!this.editing&&!this.saving)this.loadMd(true);}},
+    refresh(){viewControllers.cases=this;if(this.seenChange!==this.$state.change){this.seenChange=this.$state.change;const jobs=[this.loadList()];if(!this.editing&&!this.saving)jobs.push(this.loadMd(true));return Promise.all(jobs);}},
     dialogKey(event){
       if(event.key==='Escape'&&!this.saving){event.preventDefault();this.dlg=false;return;}
       if(event.key!=='Tab')return;
@@ -552,7 +570,7 @@ app.component('kanban-view', {
   mounted(){viewControllers.kanban=this;afterFirstScreen([this.loadCases(),this.loadSchedules(),this.loadTodos()]);},
   activated(){this.refresh();},
   methods:{
-    refresh(){if(this.seenChange!==this.$state.change&&!this.submitting){this.seenChange=this.$state.change;afterFirstScreen([this.loadCases(),this.loadSchedules(),this.loadTodos()]);if(this.doneOpen)this.loadActivity();}},
+    refresh(){if(this.seenChange!==this.$state.change&&!this.submitting){this.seenChange=this.$state.change;const jobs=[this.loadCases(),this.loadSchedules(),this.loadTodos()];afterFirstScreen(jobs);if(this.doneOpen)jobs.push(this.loadActivity());return Promise.all(jobs);}},
     async loadTodos(){
       const feed=this.todoFeed,change=this.$state.change;
       const selected=new Map(feed.items.filter(t=>this.sel[t.line_id]).map(t=>[t.line_id,t.version]));
@@ -624,7 +642,7 @@ app.component('kanban-view', {
 app.component('calendar-view', {
   props:{active:{default:true}},
   template:'#cal-tpl',
-  data(){return {heatExpand:false,heatGran:'month',monthPickerOpen:false,pickerYear:this.$state.cal.y,calendarEntry:DB.calendar(this.$state.cal.y,this.$state.cal.m),calendarSeq:0,seenChange:this.$state.change,lastDateCounts:null,pendingMonth:null,holidayDates:{},holidaySeq:0};},
+  data(){return {heatExpand:false,heatGran:'month',monthPickerOpen:false,pickerYear:this.$state.cal.y,calendarEntry:DB.calendar(this.$state.cal.y,this.$state.cal.m,this.$state.cal.showDates),calendarSeq:0,seenChange:this.$state.change,lastDateCounts:null,pendingMonth:null,holidayDates:{},holidaySeq:0};},
   computed:{
     D(){ return this.$state.D; },
     today(){ return todayStr(); },
@@ -659,6 +677,10 @@ app.component('calendar-view', {
       return m;
     },
     dayHearings(){ return this.byDate.get(this.$state.cal.sel)||[]; },
+    visibleByDate(){return this.groupItems(this.calendarEntry.data);},
+    dayItems(){return this.visibleByDate.get(this.cal.sel)||[];},
+    itemUnit(){return this.cal.showDates?'项':'场';},
+    agendaSummary(){return this.cal.showDates?this.dayItems.length+' 项 · '+this.dayHearings.length+' 场开庭':this.dayHearings.length+' 场开庭';},
     selectedHoliday(){ const s=this.$state.cal.sel; return s?(this.holidayDates[s]||null):null; },
     monthHolidayDays(){  // 本月法定节假日天数,不含调休上班
       const {y,m}=this.$state.cal,prefix=`${y}-${pad(m+1)}`;let n=0;
@@ -687,9 +709,9 @@ app.component('calendar-view', {
   mounted(){viewControllers.calendar=this;afterFirstScreen([this.loadCalendar(),this.loadHolidays()]);},
   activated(){this.refresh();},
   deactivated(){this.leave();},
-  watch:{active(value){if(value)this.refresh();else this.leave();},'$state.cal.y'(){this.loadCalendar();this.loadHolidays();},'$state.cal.m'(){this.loadCalendar();this.loadHolidays();},'$state.cal.sel'(){this.$nextTick(()=>{const agenda=this.$el.querySelector('.cal-agenda');if(agenda)agenda.scrollTop=0;});}},
+  watch:{active(value){if(value)this.refresh();else this.leave();},'$state.cal.y'(){this.loadCalendar();this.loadHolidays();},'$state.cal.m'(){this.loadCalendar();this.loadHolidays();},'$state.cal.showDates'(){this.loadCalendar();},'$state.cal.sel'(){this.$nextTick(()=>{const agenda=this.$el.querySelector('.cal-agenda');if(agenda)agenda.scrollTop=0;});}},
   methods:{
-    refresh(){viewControllers.calendar=this;if(this.seenChange!==this.$state.change){this.seenChange=this.$state.change;this.loadCalendar();}},
+    refresh(){viewControllers.calendar=this;if(this.seenChange!==this.$state.change){this.seenChange=this.$state.change;return this.loadCalendar();}},
     leave(){this.monthPickerOpen=false;if(this.pendingMonth)this.monthSwiped('next');},
     loadHolidays(){
       const {y,m}=this.$state.cal,years=[y];
@@ -708,18 +730,27 @@ app.component('calendar-view', {
     holidayInfo(date){ return this.holidayDates[date]||null; },
     cellHoliday(cell){ return this.holidayInfo(cell.date); },
     loadCalendar(force=false){
-      const {y,m}=this.$state.cal;this.calendarEntry=DB.calendar(y,m);
+      const {y,m,showDates}=this.$state.cal;this.calendarEntry=DB.calendar(y,m,showDates);
       const entry=this.calendarEntry;
       if(force)this.calendarEntry.invalidate();
       if(this.calendarEntry.error&&!force)return Promise.resolve();
-      const sequence=++this.calendarSeq,change=this.$state.change,read=DB.readCalendar(y,m);
+      const sequence=++this.calendarSeq,change=this.$state.change,read=DB.readCalendar(y,m,showDates);
       return read.then(data=>{
         if(this.calendarEntry!==entry||!entry.loaded||this.calendarSeq!==sequence||change!==this.$state.change)return;
         if(data?.dateCounts)this.lastDateCounts=data.dateCounts;
-        prefetchCalendar(y,m);
+        prefetchCalendar(y,m,showDates);
       }).catch(()=>{});
     },
     cellHearings(cell){ return this.byDate.get(cell.date)||[]; },
+    groupItems(data){
+      const byDate=new Map(),items=(data?.items||[]).map(DB.eventItem);
+      if(this.cal.showDates)items.push(...(data?.datedItems||[]).map(DB.calendarDateItem));
+      for(const item of items){if(!byDate.has(item.日期))byDate.set(item.日期,[]);byDate.get(item.日期).push(item);}
+      for(const arr of byDate.values())arr.sort((a,b)=>(a.时间||'99:99').localeCompare(b.时间||'99:99')||a.line_id.localeCompare(b.line_id));
+      return byDate;
+    },
+    itemClass(item){return item.类型==='待办'?'date-todo':item.类型?'date-record':statusClass(item.状态);},
+    itemTime(item){return item.时间||(item.类型?'全天':'待定');},
     monthGrid(page){
       if(page==='current')return this.grid;
       const target=this.pendingMonth;
@@ -736,14 +767,13 @@ app.component('calendar-view', {
       return cells;
     },
     monthEvents(cell,page){
-      if(page==='current')return this.cellHearings(cell);
-      const [year,month]=cell.date.split('-').map(Number),entry=DB.calendar(year,month-1);
+      if(page==='current')return this.visibleByDate.get(cell.date)||[];
+      const [year,month]=cell.date.split('-').map(Number),entry=DB.calendar(year,month-1,this.cal.showDates);
       if(!entry.loaded)return [];
-      this.previewMonths??=new Map();const key=year+'-'+month;
+      this.previewMonths??=new Map();const key=year+'-'+month+'-'+!!this.cal.showDates;
       let preview=this.previewMonths.get(key);
       if(!preview||preview.data!==entry.data){
-        const byDate=new Map();
-        for(const e of (entry.data?.items||[]).map(DB.eventItem)){if(!byDate.has(e.日期))byDate.set(e.日期,[]);byDate.get(e.日期).push(e);}
+        const byDate=this.groupItems(entry.data);
         preview={data:entry.data,byDate};this.previewMonths.set(key,preview);
         if(this.previewMonths.size>3)this.previewMonths.delete(this.previewMonths.keys().next().value);
       }
@@ -751,7 +781,7 @@ app.component('calendar-view', {
     },
     monthReady(page){
       const cell=this.monthGrid(page).find(Boolean);if(!cell)return false;
-      const [year,month]=cell.date.split('-').map(Number);return DB.calendar(year,month-1).loaded;
+      const [year,month]=cell.date.split('-').map(Number);return DB.calendar(year,month-1,this.cal.showDates).loaded;
     },
     monthSwiped(page){
       if(this.pendingMonth){const target=this.pendingMonth;this.pendingMonth=null;this.$state.cal.y=target.y;this.$state.cal.m=target.m;this.$state.cal.sel=target.sel;}
@@ -766,7 +796,8 @@ app.component('calendar-view', {
     select(date){ this.$state.cal.sel=date; },
     dayLabel(cell){
       const h=this.holidayInfo(cell.date),holiday=h?`，${h.name}，${h.isOffDay?'法定节假日':'调休上班'}`:'';
-      return `${cell.date} ${wk(cell.date)}${cell.date===this.today?'，今天':''}${holiday}，${this.calendarUnavailable?'日程尚未加载':this.cellHearings(cell).length+'场开庭'}`;
+      const count=this.$state.cal.showDates?(this.visibleByDate.get(cell.date)||[]).length+'项':this.cellHearings(cell).length+'场开庭';
+      return `${cell.date} ${wk(cell.date)}${cell.date===this.today?'，今天':''}${holiday}，${this.calendarUnavailable?'日程尚未加载':count}`;
     },
     changeMonth(value){
       if(!/^\d{4}-\d{2}$/.test(value))return;

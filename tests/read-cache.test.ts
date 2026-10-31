@@ -47,3 +47,13 @@ test('bounded memory evicts old completed queries without evicting active prefet
   assert.equal(cache.entry('active'),first);assert.notEqual(cache.entry('old'),old);
   finish(3);await pending;assert.equal(first.data,3);
 });
+
+test('a second consumer waits for a refreshing stale copy instead of completing with the preview',async()=>{
+  const persistence:any={read:async()=>({hit:false,stale:{items:['old']},token:{scope:'a',epoch:1}}),write:async()=>{}};
+  const entry=createReadCache(undefined,128,persistence).entry('todos');let finish:any,loads=0;
+  const first=entry.ensure(()=>{loads++;return new Promise(resolve=>{finish=resolve;});});
+  await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(entry.data,{items:['old']});assert.equal(entry.loading,true);
+  const second=entry.ensure(async()=>assert.fail('a second read was started'));assert.equal(first,second);
+  let completed=false;void second.then(()=>{completed=true;});await Promise.resolve();assert.equal(completed,false);
+  finish({items:[]});assert.deepEqual(await second,{items:[]});assert.equal(loads,1);
+});

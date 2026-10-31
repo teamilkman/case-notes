@@ -1,0 +1,2 @@
+export function atScrollTop(target:HTMLElement,root:HTMLElement):boolean;
+export function createPullRefresh(options:{canStart:(event:any)=>boolean;refresh:()=>unknown|Promise<unknown>;onChange?:(state:{distance:number;ready:boolean;refreshing:boolean})=>void;onError?:(error:any)=>void;threshold?:number}):{start(event:any):void;move(event:any):void;end(event:any):Promise<unknown>|undefined|null;cancel():void;dispose():void};

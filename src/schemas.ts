@@ -28,6 +28,11 @@ const resultType = z.enum(['all','cases','lines']);
 const lineVersion = version.describe('目标行当前 version');
 const metadataFields = z.object(fields).strict().refine(x=>Object.keys(x).length>0,'至少修改一个元数据字段')
   .describe('只修改传入字段；省略保留，可空字段用 null 清空');
+export const webCalendarDatesSchema=z.object({
+  from_date:date,to_date:date,
+  limit:z.number().int().min(1).max(100).default(20),cursor:z.string().max(4096).optional(),
+}).strict().refine(a=>a.from_date<=a.to_date,'日期范围起始日不能晚于结束日')
+  .describe('补充日期项，含归档与事务，不重复案件有效日程；calendar_date/calendar_time 为待办期限（无期限时用记录日期时间）、其他行的记录日期时间或事务有效日程日期时间；无日期项不返回。');
 export const webNotesSchema=z.object({case_ref:ref,expected_document_revision:version,
   lines:z.array(z.object({line_id:z.string().optional(),text:z.string().max(16_384)}).strict()).max(5000),
   metadata:z.object({expected_metadata_version:version,fields:metadataFields}).strict().optional()

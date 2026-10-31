@@ -14,4 +14,8 @@ export function pendingMetadata(ref:string):{case_ref:string;expected_metadata_v
 export function logout():Promise<void>;
 export function complete(todo:any):Promise<any>;
 export function feed(name:string,args?:Record<string,any>):any;
+export function calendar(y:number,m:number,includeDates?:boolean):any;
+export function readCalendar(y:number,m:number,includeDates?:boolean):Promise<any>;
+export function calendarDateItem(row:any):any;
+export function refreshData():Promise<boolean>;
 export function invalidateReads(savedDoc?:any):void;
