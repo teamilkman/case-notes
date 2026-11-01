@@ -408,6 +408,8 @@
 }
 @media(max-width:760px),(pointer:coarse) and (max-width:1024px) and (max-height:500px){
   .cal-nav>.cal-month-meta{display:none}.cal-nav>.cal-month-tools{flex:1;width:100%;gap:6px}.cal-switch-intro,.cal-switch-sep{display:none}.cal-date-switch{gap:4px;margin:0}.cal-switch-track{width:24px}.cal-date-switch[aria-checked=true] .cal-switch-track::after{transform:translateX(8px)}.cal-month-trigger .ui-icon{display:none}.cal-month-tools .cal-month-trigger{width:100%;justify-content:center}
+  .cal-month-tools .cal-month-trigger{font-size:16px;font-weight:600;line-height:1.4}
+  .cal-month-tools>.cal-arrows{display:none}
 }
 @media(max-width:390px){
   .cal-nav{padding-left:6px;padding-right:6px}.cal-nav>.cal-month-tools{gap:0}.cal-month-tools .cal-jump{min-width:44px}.cal-month-tools .go-today{width:44px;padding:0}.cal-month-tools .cal-arrows{gap:0}.cal-date-switch{gap:2px}.cal-switch-all{width:4em;white-space:normal;text-align:left;line-height:16px}.cal-switch-track{width:20px}.cal-date-switch[aria-checked=true] .cal-switch-track::after{transform:translateX(4px)}
