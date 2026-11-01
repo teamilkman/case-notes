@@ -41,6 +41,7 @@
 /* Schedule dialog */
 .dlg-mask{position:fixed;inset:0;background:#253a3159;z-index:150;display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(3px)}.dlg{width:440px;max-width:100%;max-height:calc(100dvh - 48px);overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-lg);padding:24px}.dlg-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.dlg h3{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:600;margin:0}.dlg-head .icon-btn{border:0;background:var(--surface-2)}.dlg p{font-size:12px;line-height:1.8;color:var(--text-3);margin:10px 0 22px}.dlg label{display:block;font-size:13px;color:var(--text-2);margin:0 0 8px}.dlg label span{font-size:11px;color:var(--text-3)}.dlg-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px}.dlg input,.dlg textarea{width:100%;padding:11px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;background:var(--surface-2);color:var(--text);min-width:0}.dlg input:focus,.dlg textarea:focus{border-color:#9fbaa9;box-shadow:0 0 0 3px var(--accent-soft)}.dlg textarea{height:112px;resize:vertical;line-height:1.8}.dlg-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}.dlg-actions .mini-btn{min-width:72px;min-height:38px}
 .cases-list-title h3>span{margin-left:6px;font-weight:400;white-space:nowrap}
+.cases-list-title .note-create-plus{font-size:16px;line-height:1;font-weight:400;color:inherit}
 .create-dialog select{width:100%;min-height:44px;padding:11px 10px;border:1px solid var(--border);border-radius:8px;font:inherit;background:var(--surface-2);color:var(--text)}
 .create-dialog .create-kind-label{margin-top:18px}
 .create-dialog .errbar{margin:16px 0 0}
@@ -373,7 +374,7 @@
   .view-pages .section-tabs{position:relative;isolation:isolate;display:flex;gap:0;padding:0;border:0;border-radius:7px;background:transparent}
   .view-pages .section-tabs>button{display:flex;align-items:center;justify-content:center;flex:1;min-width:0;min-height:44px;padding:2px 8px;border:0;border-radius:7px;background:transparent;color:var(--text-2);font-size:13px;line-height:20px;font-weight:500}
   .view-pages .section-tabs>button.on{background:transparent;color:var(--accent);box-shadow:none;font-weight:600}
-  .view-pages .section-tabs::before{content:"";position:absolute;left:0;top:0;bottom:0;z-index:-1;width:calc(100%/var(--tab-count,2));border-radius:7px;background:var(--accent-soft);box-shadow:none;transition:transform var(--motion-enter) var(--motion-ease);transform:translateX(calc(var(--active-tab,0)*100%))}
+  .view-pages .section-tabs::before{content:"";position:absolute;left:0;top:6px;bottom:6px;z-index:-1;width:calc(100%/var(--tab-count,2));border-radius:6px;background:var(--accent-soft);box-shadow:none;transition:transform var(--motion-enter) var(--motion-ease);transform:translateX(calc(var(--active-tab,0)*100%))}
   .col-tabs,.cases-filter .section-tabs{margin-bottom:6px}
   .cases-filter{padding:8px 12px 4px}.cases-list-title{margin-bottom:6px}
   .board .col{padding-top:8px}.board .col h2{min-height:44px;margin-bottom:6px;gap:6px}
@@ -381,9 +382,17 @@
   .board .col h2>.section-tabs{flex:1;margin-left:0}
   .board .col>.hint{display:none}
   .board .submit-btn{padding:2px 10px;line-height:20px}
+  .view-pages :is(.mobile-action,.cd-head .mini-btn,.md-toolbar .mini-btn){position:relative;isolation:isolate;min-height:44px;padding:0 10px;gap:4px;border:0;border-radius:6px;background:transparent;font-size:12px;line-height:20px}
+  .view-pages :is(.mobile-action,.cd-head .mini-btn,.md-toolbar .mini-btn)::before{content:"";position:absolute;inset:6px 0;z-index:-1;border:1px solid var(--border);border-radius:6px;background:var(--surface);pointer-events:none;transition:background-color var(--motion-fast),border-color var(--motion-fast)}
+  .view-pages :is(.mobile-action,.cd-head .primary)::before{background:var(--accent);border-color:var(--accent)}
+  .view-pages :is(.mobile-action,.cd-head .primary):enabled:hover::before{background:var(--accent-2);border-color:var(--accent-2)}
+  .board .submit-btn:disabled::before{background:#edf1ec;border-color:transparent}
   .board .done-sep{padding:6px 0}.board .done-head .win-toggle{padding:0;background:transparent}
   .board .done-head .win-toggle button{min-height:44px;padding:2px 8px;line-height:20px}
-  .board .done-head .win-toggle button.on{background:var(--accent-soft);box-shadow:none}
+  .board .done-head .win-toggle button{position:relative;isolation:isolate}
+  .board .done-head .win-toggle button.on{background:transparent;box-shadow:none}
+  .board .done-head .win-toggle button.on::before{content:"";position:absolute;inset:6px 0;z-index:-1;border-radius:6px;background:var(--accent-soft);pointer-events:none}
+  .edit-tabs{background:transparent}.edit-tabs::before{top:9px;bottom:9px;border-radius:6px;background:var(--accent-soft);box-shadow:none}
   .board .cards{gap:8px}.board .card.h{padding:8px 10px;line-height:1.65}
   .board .h-date{gap:4px;line-height:20px}.board .h-date .cd{padding:1px 6px;line-height:18px}
   .board .h-meta{margin-top:0;gap:6px;align-items:center}.board .h-meta a{flex:0 1 auto;line-height:1.65}.board .h-meta .badge{flex:none}
@@ -406,13 +415,19 @@
 @media(min-width:761px) and (max-width:1200px){
   .cal-summary-full,.cal-switch-intro,.cal-switch-sep{display:none}.cal-summary-brief{display:inline}.cal-nav{gap:6px}.cal-month-title .cal-eyebrow{display:none}.cal-month-title h3{font-size:24px}.cal-month-title h3 span{font-size:14px;margin-left:3px}.cal-nav>.cal-month-meta{font-size:12px}.cal-month-meta .cal-meta-sep{padding:0 4px}.cal-nav>.cal-month-tools{gap:6px}.cal-month-tools .cal-month-trigger{width:88px;padding:0 4px;justify-content:center;font-size:12px}.cal-month-tools .go-today{width:44px;padding:0}.cal-month-tools .cal-arrows .nav{width:30px}.cal-month-trigger .ui-icon{display:none}.cal-date-switch{gap:4px}.cal-switch-track{width:24px}.cal-date-switch[aria-checked=true] .cal-switch-track::after{transform:translateX(8px)}
 }
-@media(max-width:760px),(pointer:coarse) and (max-width:1024px) and (max-height:500px){
-  .cal-nav>.cal-month-meta{display:none}.cal-nav>.cal-month-tools{flex:1;width:100%;gap:6px}.cal-switch-intro,.cal-switch-sep{display:none}.cal-date-switch{gap:4px;margin:0}.cal-switch-track{width:24px}.cal-date-switch[aria-checked=true] .cal-switch-track::after{transform:translateX(8px)}.cal-month-trigger .ui-icon{display:none}.cal-month-tools .cal-month-trigger{width:100%;justify-content:center}
-  .cal-month-tools .cal-month-trigger{font-size:16px;font-weight:600;line-height:1.4}
-  .cal-month-tools>.cal-arrows{display:none}
-}
-@media(max-width:390px){
-  .cal-nav{padding-left:6px;padding-right:6px}.cal-nav>.cal-month-tools{gap:0}.cal-month-tools .cal-jump{min-width:44px}.cal-month-tools .go-today{width:44px;padding:0}.cal-month-tools .cal-arrows{gap:0}.cal-date-switch{gap:2px}.cal-switch-all{width:4em;white-space:normal;text-align:left;line-height:16px}.cal-switch-track{width:20px}.cal-date-switch[aria-checked=true] .cal-switch-track::after{transform:translateX(4px)}
-}
+@media(max-width:390px){.cal-nav{padding-left:6px;padding-right:6px}}
 @media(max-width:480px){.cal-trigger-full{display:none}.cal-trigger-short{display:inline}}
 @media(min-width:761px) and (max-width:1000px){.cal-month-tools .cal-month-trigger{width:44px}.cal-trigger-full{display:none}.cal-trigger-short{display:inline}.cal-switch-all{width:4em;white-space:normal;text-align:left;line-height:16px}}
+@media(max-width:760px),(pointer:coarse) and (max-width:1024px) and (max-height:500px){
+  .cal-nav>.cal-month-meta{display:none}
+  .cal-nav>.cal-month-tools{display:grid;grid-template-columns:64px max-content 48px;justify-content:center;flex:1;width:100%;gap:12px}
+  .cal-month-tools .cal-jump{flex:none;min-width:0}
+  .cal-month-tools .cal-month-trigger{width:64px;padding:0 6px;justify-content:center;font-size:16px;font-weight:600;line-height:1.4}
+  .cal-month-tools .go-today{width:48px;padding:0;font-size:13px}
+  .cal-month-trigger .ui-icon,.cal-trigger-full{display:none}.cal-trigger-short{display:inline}
+  .cal-date-switch{justify-self:center;gap:6px;margin:0;font-size:13px}
+  .cal-switch-only,.cal-switch-all{flex:none;width:auto;white-space:nowrap;line-height:20px}
+  .cal-switch-track{width:32px;height:18px}.cal-switch-track::after{width:14px;height:14px}
+  .cal-date-switch[aria-checked=true] .cal-switch-track::after{transform:translateX(14px)}
+  .cal-month-tools>.cal-arrows{display:none}
+}

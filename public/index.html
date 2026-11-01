@@ -59,7 +59,7 @@
       <template #default="{item}">
       <section v-if="item==='todo'" class="col" :class="{active: mCol==='todo'}">
         <h2><span class="board-col-label">待办 <span class="cnt">{{ todoFeed.total??'-' }}</span></span>
-          <button class="submit-btn" :disabled="submitting || !selCount || $state.connection.offline" @click="submitTodos">
+          <button class="submit-btn mobile-action" :disabled="submitting || !selCount || $state.connection.offline" @click="submitTodos">
             {{ submitting ? '正在完成…' : '完成所选'+(selCount?' · '+selCount:'') }}
           </button>
         </h2>
@@ -273,7 +273,7 @@
     <page-deck class="cases-layout" label="案件列表与详情，右滑返回上级" :model-value="selCase?'detail':'list'" :items="['list','detail']" desktop="columns" :disabled="!selCase||editing||saving||dlg||createDlg||($state.caseParent&&$state.caseParent!=='cases')" contain @update:model-value="detailSwiped" @settled="detailSettled">
     <template #default="{item}">
     <div v-if="item==='list'" class="cases-left">
-      <div class="cases-filter"><div class="cases-list-title"><h3>{{ group==='事务'?'事务':group+'案件' }} <span>{{ feed.total??'—' }} 项</span></h3><button class="mini-btn primary" :disabled="saving||$state.connection.offline" @click="openCreate">新建笔记</button></div>
+      <div class="cases-filter"><div class="cases-list-title"><h3>{{ group==='事务'?'事务':group+'案件' }} <span>{{ feed.total??'—' }} 项</span></h3><button class="mini-btn primary mobile-action" :disabled="saving||$state.connection.offline" @click="openCreate"><span class="note-create-plus" aria-hidden="true">＋</span>新建笔记</button></div>
         <div class="seg-sm section-tabs" :style="{'--active-tab':groups.indexOf(group),'--tab-count':groups.length}">
           <button v-for="g in groups" :key="g" :class="{on: group===g}" :aria-pressed="group===g" @click="group=g">{{ g }}<i>{{ count(g) }}</i></button>
         </div>
