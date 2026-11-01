@@ -1,7 +1,9 @@
 // 法定节假日（数据来源 NateScarlet/holiday-cn）：由本站 Worker 代理并做边缘缓存，
 // 浏览器只访问同源接口；本机副本在接口失败或离线时继续使用已有年份。
 const PREFIX = 'case-notes:holidays:v1:';
-const FRESH = 7 * 24 * 3600 * 1000;   // 联网新鲜度；过期后联网刷新，失败仍用旧副本
+const FRESH = 7 * 24 * 3600 * 1000;   // 已发表年份的联网新鲜度；过期后联网刷新，失败仍用旧副本
+// 空结果表示该年放假安排尚未公布，不能按一周新鲜度锁住；与 Worker 端未发布年份的缓存时长一致。
+const EMPTY_FRESH = 3600 * 1000;
 const memory = new Map(), pending = new Map();
 
 function storage() {
@@ -27,7 +29,8 @@ function read(year, now = Date.now()) {
     if (!raw) return null;
     const value = JSON.parse(raw);
     if (!value || !Array.isArray(value.days)) return null;
-    return { days: holidayDays(value.days), fresh: now - (Number(value.savedAt) || 0) < FRESH };
+    const days = holidayDays(value.days);
+    return { days, fresh: now - (Number(value.savedAt) || 0) < (days.length ? FRESH : EMPTY_FRESH) };
   } catch { return null; }
 }
 

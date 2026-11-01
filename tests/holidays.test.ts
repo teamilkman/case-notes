@@ -106,3 +106,20 @@ test('an expired local copy is refreshed online and still shown when the network
     assert.deepEqual(stale.map(day=>day.date),['2016-01-01']);
   });
 });
+
+test('an unpublished year is rechecked hourly instead of staying fresh for a week',async()=>{
+  const store=localStore(),now=Date.UTC(2026,10,1,12,0,0),spring=[{name:'春节',date:'2027-02-06',isOffDay:true}],fallback=[{name:'春节',date:'2030-02-03',isOffDay:true}];
+  store.setItem('case-notes:holidays:v1:2027',JSON.stringify({savedAt:now-2*3600*1000,days:[]}));
+  store.setItem('case-notes:holidays:v1:2029',JSON.stringify({savedAt:now-10*60*1000,days:[]}));
+  store.setItem('case-notes:holidays:v1:2030',JSON.stringify({savedAt:now-6*24*3600*1000,days:fallback}));
+  await useStorage(store,async()=>{
+    let calls=0;
+    const published=await loadHolidayYear(2027,{now,fetcher:async()=>{calls++;return spring;}});
+    assert.equal(calls,1);assert.deepEqual(published.map(day=>day.date),['2027-02-06']);
+    assert.deepEqual(peekHolidayYear(2027).map(day=>day.date),['2027-02-06']);
+    const recent=await loadHolidayYear(2029,{now,fetcher:async()=>{calls++;return spring;}});
+    assert.equal(calls,1);assert.deepEqual(recent,[]);
+    const cached=await loadHolidayYear(2030,{now,fetcher:async()=>{calls++;return [];}});
+    assert.equal(calls,1);assert.deepEqual(cached.map(day=>day.date),['2030-02-03']);
+  });
+});
