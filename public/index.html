@@ -320,7 +320,7 @@
           <div class="c-dates"><template v-if="editing">创建 <input form="case-edit-form" type="date" aria-label="创建日期" v-model="metaForm.opened_date" :disabled="saving"></template><template v-else>创建 {{ sel.创建||'-' }}</template> ｜ 最近活动 {{ sel.最近活动||'-' }}</div>
         </div>
         <div v-if="editing&&editError" class="errbar" role="alert">{{ editError }}</div>
-        <div class="notes-head"><h3>{{ editing?'编辑笔记':'工作记录' }}</h3><span v-if="editing" class="edit-state">{{ saving?'正在保存…':hasEdits?'有未保存的修改':'编辑模式' }}</span><span v-else-if="mdLoading&&mdText" class="edit-state">正在同步…</span><span v-if="!canEditBody" class="readonly-note"><ui-icon name="lock"></ui-icon>归档笔记只读</span></div>
+        <div v-if="!editing||!canEditBody||!$state.mobile" class="notes-head"><h3>{{ editing?'编辑笔记':'工作记录' }}</h3><span v-if="editing" class="edit-state">{{ editStatus }}</span><span v-else-if="mdLoading&&mdText" class="edit-state">正在同步…</span><span v-if="!canEditBody" class="readonly-note"><ui-icon name="lock"></ui-icon>归档笔记只读</span></div>
         <template v-if="!editing||!canEditBody">
           <div class="case-content">
           <loading-skeleton v-if="mdLoading&&!mdText" kind="notes" :rows="5" label="正在加载案件笔记"></loading-skeleton>
@@ -337,6 +337,7 @@
             <div class="md-toolbar" @touchstart="toolbarTouchStart" @touchend="toolbarTouchEnd" @touchcancel="toolbarTouchCancel">
               <span role="button" class="mini-btn" data-toolbar="schedule" :tabindex="$state.mobile?null:0" :aria-disabled="saving||null" title="弹窗填写日期时间正文，插入到光标所在行的下一行" @click="toolbarClick('schedule')" @keydown.enter.prevent="toolbarClick('schedule')" @keydown.space.prevent="toolbarClick('schedule')"><ui-icon name="calendar"></ui-icon>插入日程</span>
               <span role="button" class="mini-btn" data-toolbar="todo" :tabindex="$state.mobile?null:0" :aria-disabled="saving||null" title="行首复选框循环切换：无 ↔ - [ ]；- [x] 已完成项不参与切换" @click="toolbarClick('todo')" @keydown.enter.prevent="toolbarClick('todo')" @keydown.space.prevent="toolbarClick('todo')"><ui-icon name="check"></ui-icon>切换待办</span>
+              <span v-if="$state.mobile" class="edit-state">{{ editStatus }}</span>
             </div>
             <textarea ref="editor" class="md-editor" name="md-editor" aria-label="案件笔记正文" :value="editText" :disabled="saving" @input="noteInput" @compositionend="noteInput" @beforeinput="beforeNoteInput" spellcheck="false"
                       placeholder="在此编辑 Markdown 笔记（支持 - 列表、📅 日程、[ ] 待办、## 标题、--- 分隔块等，保存到数据库）"></textarea>

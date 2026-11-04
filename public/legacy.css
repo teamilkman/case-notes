@@ -59,14 +59,19 @@
 .metadata-status{flex:none;max-width:100%;border:0;border-radius:0;background:linear-gradient(var(--metadata-rule,var(--border)),var(--metadata-rule,var(--border))) left calc(50% + .8em - .5px)/100% 1px no-repeat transparent;color:var(--text);font:inherit;font-size:13px;line-height:1.6;height:calc(1.6em + 4px);padding:2px 0;cursor:pointer}
 .metadata-status:focus{--metadata-rule:var(--accent);outline:none}
 @media(max-width:760px),(pointer:coarse) and (max-width:1024px) and (max-height:500px){
-  .case-detail.editing-metadata .metadata-field{min-height:44px;font-size:16px}
-  .case-detail.editing-metadata input[type=date]{min-height:44px;font-size:16px}
-  .metadata-status{min-height:44px;font-size:16px}
+  .case-detail.editing-metadata .metadata-field{min-height:28px;font-size:16px;line-height:1.4}
+  .case-detail.editing-metadata input[type=date]{min-height:28px;font-size:16px;line-height:1.4}
+  .metadata-status{min-height:28px;font-size:16px;line-height:1.4;height:auto}
   .case-detail.editing-metadata .cd-head{flex-wrap:nowrap}
   .case-detail.editing-metadata .cd-head h2{flex:1 1 0}
-  .case-detail.editing-metadata .c-meta{gap:4px 12px;align-items:center}
+  .case-detail.editing-metadata .c-meta{gap:2px 12px;align-items:center}
   .case-detail.editing-metadata .c-meta>div{flex:0 1 auto}
-  .case-detail.editing-metadata .c-dates{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+  .case-detail.editing-metadata .c-meta>div>span:first-child{flex:none}
+  .case-detail.editing-metadata .case-meta{padding-bottom:8px;margin-bottom:8px}
+  .case-detail.editing-metadata .c-dates{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:4px}
+  .md-toolbar{flex-wrap:nowrap;align-items:center}
+  .md-toolbar .mini-btn{flex:none}
+  .md-toolbar .edit-state{flex:1;justify-content:flex-end;margin-left:auto;min-width:0;text-align:right;line-height:1.4}
 }
 @media(min-width:761px) and (max-width:1100px){.app-header{padding:14px 20px;gap:16px}.brand span,.header-date{display:none}.seg button{padding:5px 16px}.board-wrap,.cases-wrap{padding:14px 16px 16px}.board,.cases-layout{gap:14px}.col{padding:16px 10px 10px}.cases-left{flex-basis:290px}.cases-right{padding:22px 20px}.cd-head{flex-wrap:wrap}.c-meta{gap:16px}.c-recent{display:none}.col h2 .win-toggle button{padding:4px 7px}.md-split{gap:12px}}
 @media(max-width:760px),(pointer:coarse) and (max-width:1024px) and (max-height:500px){

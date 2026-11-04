@@ -306,6 +306,7 @@ app.component('cases-view', {
     backLabel(){return this.$state.caseParent==='kanban'?'返回看板':this.$state.caseParent==='calendar'?'返回日历':'返回列表';},
     canEditBody(){return this.dbDoc?.case?.status==='在办';},
     hasEdits(){return this.editText!==this.mdText||Object.keys(this.metadataChanges()).length>0;},
+    editStatus(){return this.saving?'正在保存…':this.hasEdits?'有未保存的修改':'编辑模式';},
   },
   watch:{
     active(value){if(value)this.refresh();},
