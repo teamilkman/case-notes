@@ -147,25 +147,24 @@
     <div class="cal-workspace">
       <section class="cal-month" :class="{'picker-open':monthPickerOpen}" aria-label="月历">
         <div class="cal-nav">
-          <div class="cal-month-title"><span class="cal-eyebrow">{{ cal.y }} 年</span><h3>{{ cal.m+1 }}<span>月</span></h3></div>
+          <div class="cal-jump cal-title-jump">
+            <button ref="monthTrigger" class="cal-month-title" :aria-label="calTitle+'，选择月份'" :title="calTitle" aria-haspopup="dialog" :aria-expanded="monthPickerOpen" aria-controls="calendar-month-picker" @click="toggleMonthPicker"><span class="cal-title-text"><span class="cal-eyebrow">{{ cal.y }} 年</span><span class="cal-title-month">{{ cal.m+1 }}<span class="cal-title-unit">月</span></span></span><ui-icon name="chevron"></ui-icon></button>
+            <teleport v-if="monthPickerOpen" to="body" :disabled="!$state.mobile">
+              <div class="cal-picker-backdrop" aria-hidden="true" @click="closeMonthPicker()"></div>
+              <div id="calendar-month-picker" ref="monthPicker" class="cal-month-picker" role="dialog" aria-modal="true" aria-label="选择年份和月份" @keydown="monthPickerKey">
+                <div class="cal-picker-year"><button class="nav" aria-label="上一年" :disabled="pickerYear<=1000" @click="stepPickerYear(-1)">‹</button><label><input ref="pickerYearInput" type="text" inputmode="numeric" maxlength="4" aria-label="年份" :value="pickerYear" @change="setPickerYear($event)" @keydown.enter.prevent="setPickerYear($event)"><span>年</span></label><button class="nav" aria-label="下一年" :disabled="pickerYear>=9999" @click="stepPickerYear(1)">›</button></div>
+                <div class="cal-picker-months" role="group" :aria-label="pickerYear+'年的月份'">
+                  <button v-for="m in 12" :key="m" :data-month="m-1" :aria-pressed="pickerYear===cal.y&&m-1===cal.m" @click="pickMonth(m-1)" @keydown="pickerMonthKey($event,m-1)">{{ m }}月</button>
+                </div>
+                <button class="cal-picker-cancel" @click="closeMonthPicker()">取消</button>
+              </div>
+            </teleport>
+          </div>
           <div class="cal-month-meta" :aria-busy="calendarLoading||calendarSyncing">
             <span v-if="!calendarUnavailable"><span class="cal-summary-full">本月 <b>{{ monthSummary.hearings }}</b> 场开庭<span class="cal-meta-sep">·</span>分布于 <b>{{ monthSummary.days }}</b> 天<span v-if="monthHolidayDays"><span class="cal-meta-sep">·</span>节假日 <b>{{ monthHolidayDays }}</b> 天</span></span><span class="cal-summary-brief"><b>{{ monthSummary.hearings }}</b> 场<span class="cal-meta-sep">·</span><b>{{ monthSummary.days }}</b> 天</span><span v-if="calendarSyncing"> · 正在同步…</span></span>
             <span v-else>{{ calendarError ? '本月日程读取失败' : '正在读取本月日程…' }}</span>
           </div>
           <div class="cal-month-tools">
-            <div class="cal-jump">
-              <button ref="monthTrigger" class="cal-month-trigger" :aria-label="calTitle+'，选择月份'" :title="calTitle" aria-haspopup="dialog" :aria-expanded="monthPickerOpen" aria-controls="calendar-month-picker" @click="toggleMonthPicker"><ui-icon name="calendar"></ui-icon><span class="cal-trigger-full">{{ calTitle }}</span><span class="cal-trigger-short"><span class="cal-trigger-year">{{ cal.y }}年</span><span class="cal-trigger-month">{{ cal.m+1 }}<span class="cal-trigger-unit">月</span></span></span><ui-icon name="chevron"></ui-icon></button>
-              <teleport v-if="monthPickerOpen" to="body" :disabled="!$state.mobile">
-                <div class="cal-picker-backdrop" aria-hidden="true" @click="closeMonthPicker()"></div>
-                <div id="calendar-month-picker" ref="monthPicker" class="cal-month-picker" role="dialog" aria-modal="true" aria-label="选择年份和月份" @keydown="monthPickerKey">
-                  <div class="cal-picker-year"><button class="nav" aria-label="上一年" :disabled="pickerYear<=1000" @click="stepPickerYear(-1)">‹</button><label><input ref="pickerYearInput" type="text" inputmode="numeric" maxlength="4" aria-label="年份" :value="pickerYear" @change="setPickerYear($event)" @keydown.enter.prevent="setPickerYear($event)"><span>年</span></label><button class="nav" aria-label="下一年" :disabled="pickerYear>=9999" @click="stepPickerYear(1)">›</button></div>
-                  <div class="cal-picker-months" role="group" :aria-label="pickerYear+'年的月份'">
-                    <button v-for="m in 12" :key="m" :data-month="m-1" :aria-pressed="pickerYear===cal.y&&m-1===cal.m" @click="pickMonth(m-1)" @keydown="pickerMonthKey($event,m-1)">{{ m }}月</button>
-                  </div>
-                  <button class="cal-picker-cancel" @click="closeMonthPicker()">取消</button>
-                </div>
-              </teleport>
-            </div>
             <button type="button" class="cal-date-switch" role="switch" :aria-checked="!!cal.showDates" aria-label="日历显示范围：仅开庭 / 全部日程" title="切换整个月历的显示范围；全部日程包括开庭、待办、记录、已完成记录和事务日程" @click="cal.showDates=!cal.showDates"><span class="cal-switch-only">仅开庭</span><span class="cal-switch-track" aria-hidden="true"></span><span class="cal-switch-all">全部日程</span></button>
             <button class="go-today" @click="goToday">今天</button>
             <div class="cal-arrows"><button class="nav" aria-label="上个月" @click="nav(-1)">‹</button><button class="nav" aria-label="下个月" @click="nav(1)">›</button></div>
