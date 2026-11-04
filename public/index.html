@@ -154,7 +154,7 @@
           </div>
           <div class="cal-month-tools">
             <div class="cal-jump">
-              <button ref="monthTrigger" class="cal-month-trigger" aria-label="选择月份" :title="calTitle" aria-haspopup="dialog" :aria-expanded="monthPickerOpen" aria-controls="calendar-month-picker" @click="toggleMonthPicker"><ui-icon name="calendar"></ui-icon><span class="cal-trigger-full">{{ calTitle }}</span><span class="cal-trigger-short">{{ cal.m+1 }}月</span><ui-icon name="chevron"></ui-icon></button>
+              <button ref="monthTrigger" class="cal-month-trigger" :aria-label="calTitle+'，选择月份'" :title="calTitle" aria-haspopup="dialog" :aria-expanded="monthPickerOpen" aria-controls="calendar-month-picker" @click="toggleMonthPicker"><ui-icon name="calendar"></ui-icon><span class="cal-trigger-full">{{ calTitle }}</span><span class="cal-trigger-short"><span class="cal-trigger-year">{{ cal.y }}年</span><span class="cal-trigger-month">{{ cal.m+1 }}<span class="cal-trigger-unit">月</span></span></span><ui-icon name="chevron"></ui-icon></button>
               <teleport v-if="monthPickerOpen" to="body" :disabled="!$state.mobile">
                 <div class="cal-picker-backdrop" aria-hidden="true" @click="closeMonthPicker()"></div>
                 <div id="calendar-month-picker" ref="monthPicker" class="cal-month-picker" role="dialog" aria-modal="true" aria-label="选择年份和月份" @keydown="monthPickerKey">
