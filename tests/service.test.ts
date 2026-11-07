@@ -317,15 +317,19 @@ test('daily quota failures identify reset time and never request immediate retry
   assert.equal(failure(new Error('ordinary network failure')).error.retryable,true);
 });
 
-test('live verification exercises REST and MCP on both hosts without snapshot writes and stops on daily quota',async()=>{
+test('live verification requires disabled default and preview URLs and exercises REST and MCP only on the custom domain',async()=>{
   for(const name of ['续页核验事务一','续页核验事务二'])await call('cases_create',{name,kind:'affair',request_key:key()});
   const source=readFileSync('tools/check-deployment.mjs','utf8'),searches:any[]=[],waits:number[]=[];
   const config={CLOUDFLARE_ACCOUNT_ID:'synthetic-account',CLOUDFLARE_API_TOKEN:'synthetic-deployment-token',
     WEB_PASSWORD:'test-password',DEPLOYMENT_URL:'https://synthetic-domain.test'};
   const before=(await env.DB.prepare('SELECT COUNT(*) AS n FROM read_snapshots').first<any>()).n;
-  let quota=false,attempts=0;
+  let quota=false,attempts=0;const hosts=new Set<string>(),endpointState={enabled:false,previews_enabled:false};
   const fakeFetch=async(url:string,options:any={})=>{
-    if(new URL(url).host==='api.cloudflare.com')return Response.json({success:true,result:{subdomain:'synthetic-worker'}});
+    if(new URL(url).host==='api.cloudflare.com'){
+      assert.equal(new URL(url).pathname,'/client/v4/accounts/synthetic-account/workers/scripts/case-notes/subdomain');
+      return Response.json({success:true,result:endpointState});
+    }
+    hosts.add(new URL(url).origin);
     const body=options.body&&String(options.headers?.['Content-Type']??'').startsWith('application/json')?JSON.parse(String(options.body)):null;
     const authenticated=new URL(url).pathname==='/api/v1/search'&&options.headers?.Authorization;
     if(authenticated){attempts++;if(quota)return Response.json(failure(new Error("Your account has exceeded D1's free tier daily row read limit.")),{status:503});}
@@ -338,10 +342,13 @@ test('live verification exercises REST and MCP on both hosts without snapshot wr
   };
   const run=()=>runInNewContext(`(async()=>{${source}\n})()`,{fetch:fakeFetch,URL,URLSearchParams,crypto,Buffer,TextEncoder,process:{env:config},console:{log(){}},
     setTimeout:(fn:()=>void,ms:number)=>{waits.push(ms);fn();}});
-  await run();assert.equal(searches.length,8);assert.ok(searches.every(s=>s.snapshot_id===null));
-  assert.equal(searches.filter(s=>s.page_start===1).length,4);
+  await run();assert.equal(searches.length,4);assert.ok(searches.every(s=>s.snapshot_id===null));
+  assert.equal(searches.filter(s=>s.page_start===1).length,2);assert.deepEqual([...hosts],[config.DEPLOYMENT_URL]);
   assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM read_snapshots').first<any>()).n,before);
   assert.equal(waits.length,0);
+  endpointState.enabled=true;await assert.rejects(run(),/default and preview URLs must be disabled/);endpointState.enabled=false;
+  endpointState.previews_enabled=true;await assert.rejects(run(),/default and preview URLs must be disabled/);endpointState.previews_enabled=false;
+  config.DEPLOYMENT_URL='https://synthetic.workers.dev';await assert.rejects(run(),/requires the HTTPS custom domain/);config.DEPLOYMENT_URL='https://synthetic-domain.test';
   quota=true;attempts=0;await assert.rejects(run(),/daily quota exceeded/);
   assert.equal(attempts,1);assert.equal(waits.length,0);
 });

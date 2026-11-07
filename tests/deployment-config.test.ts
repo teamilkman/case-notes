@@ -8,10 +8,11 @@ import {runInNewContext} from 'node:vm';
 test('domain-free deployment config is generated in a clean CI checkout before the Worker exists',()=>{
   const root=mkdtempSync(resolve(tmpdir(),'case-notes-stage-'));
   try{
-    writeFileSync(resolve(root,'wrangler.jsonc'),JSON.stringify({name:'case-notes',main:'src/worker.ts',routes:[{pattern:'synthetic.example'}],assets:{directory:'public'},d1_databases:[{database_id:'synthetic-id'}]}));
+    writeFileSync(resolve(root,'wrangler.jsonc'),JSON.stringify({name:'case-notes',main:'src/worker.ts',workers_dev:false,preview_urls:false,routes:[{pattern:'synthetic.example'}],assets:{directory:'public'},d1_databases:[{database_id:'synthetic-id'}]}));
     const result=spawnSync(process.execPath,[resolve('node_modules/tsx/dist/cli.mjs'),resolve('tools/rename-resources.ts'),'--stage-config'],{cwd:root,encoding:'utf8'});
     assert.equal(result.status,0,result.stderr);
     const staged=JSON.parse(readFileSync(resolve(root,'.wrangler/staged-worker.json'),'utf8'));
+    assert.equal(staged.workers_dev,false);assert.equal(staged.preview_urls,false);
     assert.deepEqual(staged.routes,[]);assert.equal(staged.main,resolve(root,'src/worker.ts'));assert.equal(staged.assets.directory,resolve(root,'public'));assert.equal(staged.d1_databases[0].database_id,'synthetic-id');
   }finally{assert.ok(root.startsWith(resolve(tmpdir(),'case-notes-stage-')));rmSync(root,{recursive:true});}
 });
@@ -25,6 +26,7 @@ test('the deployment address and identifiers are rendered from the environment, 
     const rendered=spawnSync(process.execPath,[resolve('tools/render-wrangler.mjs')],{cwd:root,env,encoding:'utf8'});
     assert.equal(rendered.status,0,rendered.stderr);
     const config=JSON.parse(readFileSync(resolve(root,'wrangler.jsonc'),'utf8'));
+    assert.equal(config.workers_dev,false);assert.equal(config.preview_urls,false);
     assert.equal(config.routes[0].pattern,'synthetic.example');assert.equal(config.routes[0].zone_id,'synthetic-zone');
     assert.equal(config.d1_databases[0].database_id,'synthetic-db');assert.equal(config.account_id,undefined);
     const incomplete=spawnSync(process.execPath,[resolve('tools/render-wrangler.mjs')],{cwd:root,env:{...env,DOMAIN:''},encoding:'utf8'});

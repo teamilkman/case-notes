@@ -3,12 +3,14 @@ const account=process.env.CLOUDFLARE_ACCOUNT_ID;
 const token=process.env.CLOUDFLARE_API_TOKEN;
 // Programmatic access is OAuth only: the run mints a short-lived token from the web password.
 const webPassword=process.env.WEB_PASSWORD;
-if(!account||!token||!webPassword)throw new Error('Missing deployment credentials');
-const response=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/workers/subdomain`,{headers:{Authorization:`Bearer ${token}`}});
+const deploymentUrl=process.env.DEPLOYMENT_URL;
+if(!account||!token||!webPassword||!deploymentUrl)throw new Error('Missing deployment credentials');
+const target=new URL(deploymentUrl);
+if(target.protocol!=='https:'||target.hostname==='workers.dev'||target.hostname.endsWith('.workers.dev'))throw new Error('Deployment verification requires the HTTPS custom domain');
+const response=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/case-notes/subdomain`,{headers:{Authorization:`Bearer ${token}`}});
 const result=await response.json();
-if(!response.ok||!result.success||!result.result?.subdomain)throw new Error('Cannot resolve workers.dev subdomain');
-const workerUrl=`https://case-notes.${result.result.subdomain}.workers.dev`;
-const urls=[...new Set([workerUrl,...(process.env.DEPLOYMENT_URL?[new URL(process.env.DEPLOYMENT_URL).origin]:[])])];
+if(!response.ok||!result.success||result.result?.enabled!==false||result.result?.previews_enabled!==false)throw new Error('Worker default and preview URLs must be disabled');
+const urls=[target.origin];
 const searchArgs={result_type:'cases',scope:'affairs',limit:1};
 function checkQuota(result){
   if(result.error?.code==='DAILY_LIMIT_EXCEEDED'){

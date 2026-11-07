@@ -6,7 +6,7 @@ async function check(limiter:RateLimit,key:string) {
 }
 
 // Run before parsing bodies or accessing D1. One bucket covers every dynamic
-// route on both domains; rotating paths and credentials cannot reset it.
+// route for this Worker; rotating paths and credentials cannot reset it.
 export async function limitRequest(request:Request,env:Env) {
   const path=new URL(request.url).pathname;
   if(!path.startsWith('/api/')&&!path.startsWith('/oauth/')&&!path.startsWith('/.well-known/')&&path!=='/mcp'&&path!=='/health')return;
