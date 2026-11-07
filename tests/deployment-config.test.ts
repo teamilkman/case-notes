@@ -61,7 +61,10 @@ test('CI edge protection creates and verifies its own rule, repeats without writ
     if(method==='GET'&&!state)return {ok:false,status:404,json:async()=>({success:false,errors:[{code:10003}]})};
     if(method!=='GET'){
       const body=JSON.parse(options.body);mutations.push({method,path,body});
-      if(method==='POST'&&path.endsWith('/rulesets'))state={id:'synthetic-ruleset',rules:body.rules.map((r:any)=>({...r,id:'synthetic-owned'}))};
+      if(method==='POST'&&path.endsWith('/rulesets')){
+        state={id:'synthetic-ruleset',rules:body.rules.map((r:any)=>({...r,id:'synthetic-owned'}))};
+        delete state.rules[0].ratelimit.requests_to_origin; // real API omits false defaults
+      }
       else if(method==='PATCH')state.rules=state.rules.map((r:any)=>r.ref===body.ref?{...body,id:r.id}:r);
       else if(method==='POST')state.rules.push({...body,id:'synthetic-owned'});
     }
@@ -73,6 +76,9 @@ test('CI edge protection creates and verifies its own rule, repeats without writ
   const rule=state.rules[0];assert.equal(rule.expression,'true');assert.equal(rule.action,'block');assert.equal(rule.ratelimit.requests_per_period,100);assert.equal(rule.ratelimit.period,10);
   await run();assert.equal(mutations.length,1);
   await run(['--verify']);assert.equal(mutations.length,1);
+  state.rules[0].ratelimit.requests_to_origin=true;
+  await assert.rejects(run(['--verify']),/readback verification failed/);
+  delete state.rules[0].ratelimit.requests_to_origin;
   const unrelated={id:'other',ref:'other-project',expression:'http.request.uri.path eq "/other"',enabled:true};state.rules.push(unrelated);
   state.rules[0].ratelimit.requests_per_period=999;
   await assert.rejects(run(['--verify']),/readback verification failed/);assert.equal(mutations.length,1);

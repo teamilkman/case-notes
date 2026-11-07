@@ -14,7 +14,9 @@ async function api(path,method='GET',body){
 }
 function matches(rule){
   return rule?.ref===ref&&rule.enabled===true&&rule.expression===desired.expression&&rule.action===desired.action&&
-    ['period','requests_per_period','mitigation_timeout','requests_to_origin'].every(key=>rule.ratelimit?.[key]===desired.ratelimit[key])&&
+    ['period','requests_per_period','mitigation_timeout'].every(key=>rule.ratelimit?.[key]===desired.ratelimit[key])&&
+    // Cloudflare omits false defaults from its readback response.
+    (rule.ratelimit?.requests_to_origin??false)===desired.ratelimit.requests_to_origin&&
     JSON.stringify([...(rule.ratelimit?.characteristics??[])].sort())===JSON.stringify([...desired.ratelimit.characteristics].sort());
 }
 const endpoint=`${base}/phases/${phase}/entrypoint`;
