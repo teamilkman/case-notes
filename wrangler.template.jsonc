@@ -29,6 +29,11 @@
   "vars": {
     "WORKSPACE_ID": "personal"
   },
+  "ratelimits": [
+    { "name": "API_RATE_LIMITER", "namespace_id": "110801", "simple": { "limit": 120, "period": 60 } },
+    { "name": "AI_RATE_LIMITER", "namespace_id": "110802", "simple": { "limit": 30, "period": 60 } },
+    { "name": "AUTH_RATE_LIMITER", "namespace_id": "110803", "simple": { "limit": 20, "period": 60 } }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

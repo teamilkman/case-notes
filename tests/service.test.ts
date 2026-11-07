@@ -11,6 +11,7 @@ import { AppError, failure, type Env, type Principal } from '../src/types';
 import { parseLine, PARSER_VERSION } from '../src/parser';
 import { instructions, descriptions, outputSchemas, errorResponseSchema, type ToolName } from '../src/schemas';
 import { migrationSql } from './migrations';
+import {testRateLimits,allowedRateLimits} from './runtime-rate-limits';
 
 let mf:Miniflare,env:Env;
 const temp=mkdtempSync(resolve(tmpdir(),'case-notes-test-'));
@@ -69,13 +70,13 @@ async function lines(cid:string){const r:any=await call('cases_get',{case_ref:ci
 before(async()=>{
   mf=new Miniflare(convertV4MiniflareOptions({name:'case-notes-test',modules:true,scriptPath:resolve('dist/worker.js'),compatibilityDate:'2026-10-01',compatibilityFlags:['nodejs_compat'],
     telemetry:{enabled:false},resourcePersistencePath:temp,d1Databases:{DB:'test-business'},
-    bindings:{WEB_PASSWORD:'test-password',WORKSPACE_ID:'personal'},
+    bindings:{WEB_PASSWORD:'test-password',WORKSPACE_ID:'personal'},ratelimits:testRateLimits,
     assets:{directory:resolve('public'),binding:'ASSETS',run_worker_first:['/api/*','/mcp','/health','/oauth/*','/.well-known/*'],routerConfig:{has_user_worker:true}}}));
   const db=await mf.getD1Database('DB');
   for(const [database,folder] of [[db,'migrations/business']] as const)
     for(const file of readdirSync(folder).filter(f=>f.endsWith('.sql')).sort())
       await database.batch(migrationSql(resolve(folder,file)).map(s=>database.prepare(s)));
-  env={DB:db as unknown as D1Database,ASSETS:null as any,WEB_PASSWORD:'test-password'};
+  env={DB:db as unknown as D1Database,ASSETS:null as any,WEB_PASSWORD:'test-password',...allowedRateLimits};
 });
 after(async()=>{await mf?.dispose();assert.equal(dirname(realpathSync(temp)),realpathSync(tmpdir()));assert.ok(basename(temp).startsWith('case-notes-test-'));rmSync(temp,{recursive:true});});
 

@@ -135,7 +135,7 @@ const receipt = {
 };
 const writtenLine = rawLine.extend({parsed:parsedData});
 const errorData = z.object({
-  code:z.string().describe('DAILY_LIMIT_EXCEEDED 表示当天访问额度耗尽，停止即时重试；READ_CHANGED 表示跨页期间相关数据变化；CURSOR_EXPIRED 表示游标过期或已停用，后两者须丢弃已有页并从头读取'),message:z.string(),details:z.unknown().describe('随错误代码变化的上下文，如候选案件、当前原文及版本；DAILY_LIMIT_EXCEEDED 返回 resets_at（UTC 重置时刻）'),
+  code:z.string().describe('RATE_LIMITED 表示请求过于频繁，须等待后重试；DAILY_LIMIT_EXCEEDED 表示当天访问额度耗尽，停止即时重试；READ_CHANGED 表示跨页期间相关数据变化；CURSOR_EXPIRED 表示游标过期或已停用，后两者须丢弃已有页并从头读取'),message:z.string(),details:z.unknown().describe('随错误代码变化的上下文，如候选案件、当前原文及版本；RATE_LIMITED 返回 retry_after（再次请求前等待的秒数），DAILY_LIMIT_EXCEEDED 返回 resets_at（UTC 重置时刻）'),
   retryable:z.boolean(),commit_state:z.string().describe('not_committed 表示未提交，unknown 表示提交状态不明'),
   next_action:z.string().describe('下一步处理提示'),
 }).strict();
@@ -183,7 +183,7 @@ export const instructions = `# 案记
 
 同次保存原文与元数据时，两类版本保护、原文、索引、元数据、审计和回执必须一并提交或一并拒绝；归档笔记原文保持不变。
 
-读取按任务指定 case_ref、scope、日期或类型，避免为追加一段笔记先读取全库；已知完整案名或 ID 时可直接追加。只查案件用 result_type=cases，需要全部案件时可设 limit=500。同一任务中复用已读取的结果，需核对新修改或出现版本冲突时再读。DAILY_LIMIT_EXCEEDED 时停止即时重试，等待 details.resets_at 后继续；提交状态不明的写入仍用原键和原参数核对。
+读取按任务指定 case_ref、scope、日期或类型，避免为追加一段笔记先读取全库；已知完整案名或 ID 时可直接追加。只查案件用 result_type=cases，需要全部案件时可设 limit=500。同一任务中复用已读取的结果，需核对新修改或出现版本冲突时再读。RATE_LIMITED 时停止即时重试，等待 details.retry_after 秒后继续，写入保留原 request_key 和原参数。DAILY_LIMIT_EXCEEDED 时停止即时重试，等待 details.resets_at 后继续；提交状态不明的写入仍用原键和原参数核对。
 
 has_more=true 时保持全部参数，用 next_cursor 续读至结束。游标绑定客户端、工具和参数，有效期 15 分钟。跨页期间正文或元数据变化返回 READ_CHANGED；指定 case_ref 时仅校验该案件，未指定时校验整个工作区。CURSOR_EXPIRED 表示游标过期或已停用。遇到这两类错误须丢弃已收集的页，清除 cursor，按原条件从第一页重新读取，不拼接新旧页。snapshot_id 固定为 null，complete 固定为 true，是否取完只看 has_more。
 

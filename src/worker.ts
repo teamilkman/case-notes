@@ -7,6 +7,7 @@ import { AppError, failure, success, type Env } from './types';
 import { webRead } from './web-queries';
 import { holidayCalendar } from './holidays';
 import { handleOAuth, oauthChallenge } from './oauth';
+import { limitRequest, limitPrincipal } from './rate-limit';
 
 function json(data:unknown,status=200,extra:Record<string,string>={}) {
   return Response.json(data,{status,headers:{'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff',...extra}});
@@ -28,7 +29,8 @@ const makeOpenapi=()=>{
   paths:Object.fromEntries(toolNames.map(name=>[`/api/v1/${name}`,{post:{operationId:name,description:descriptions[name],
     requestBody:{required:true,content:{'application/json':{schema:z.toJSONSchema(schemas[name])}}},
     responses:{'200':{description:'业务结果',content:{'application/json':{schema:z.toJSONSchema(outputSchemas[name],{target:'draft-7',io:'output'})}}},
-      '409':{...errorResponse,description:'版本或请求键冲突'},'401':{...errorResponse,description:'需要认证'},default:errorResponse}}}]))};
+      '409':{...errorResponse,description:'版本或请求键冲突'},'401':{...errorResponse,description:'需要认证'},
+      '429':{...errorResponse,description:'请求限流，等待 Retry-After 或 error.details.retry_after 秒后重试',headers:{'Retry-After':{schema:{type:'integer'},description:'再次请求前需等待的秒数'}}},default:errorResponse}}}]))};
 };
 let openapi:ReturnType<typeof makeOpenapi>|undefined;
 
@@ -36,6 +38,10 @@ export default {
   async fetch(request:Request,env:Env,ctx:ExecutionContext):Promise<Response> {
     const url=new URL(request.url),path=url.pathname;
     try {
+      // Stateless JSON RPC offers no server-initiated SSE stream. Returning 200
+      // then closing the stream makes clients reconnect forever, even when idle.
+      if(path==='/mcp'&&request.method!=='POST')return json({jsonrpc:'2.0',id:null,error:{code:-32000,message:'Method not allowed; use POST.'}},405,{Allow:'POST'});
+      await limitRequest(request,env);
       const oauth=await handleOAuth(request,env);if(oauth)return oauth;
       if(path==='/health')return json({ok:true,version:'0.1.0'});
       if(path==='/api/openapi.json')return json(openapi??=makeOpenapi());
@@ -46,6 +52,7 @@ export default {
       if(path.startsWith('/api/')||path==='/mcp') {
         const p=await authenticate(request,env);
         if(p.source==='web'&&request.method!=='GET')checkOrigin(request);
+        await limitPrincipal(env,p);
         if(path==='/mcp') {
           if(p.source!=='ai')throw new AppError('PERMISSION_DENIED','MCP 请通过 OAuth 授权或使用独立 AI 接口令牌。',null,403);
           if(request.headers.has('Origin')&&request.headers.get('Origin')!==url.origin)throw new AppError('PERMISSION_DENIED','MCP 不接受跨站浏览器调用。',null,403);
@@ -82,6 +89,11 @@ export default {
       return new Response(response.body,{status:response.status,headers});
     } catch(error) {
       const result=failure(error),status=error instanceof AppError?error.status:503;
+      if(status===429){
+        const retry=String(((error as AppError).details as {retry_after?:number}|null)?.retry_after??60);
+        if(path.startsWith('/oauth/'))return json({error:'temporarily_unavailable',error_description:result.error.message},429,{'Retry-After':retry,'Access-Control-Allow-Origin':'*','Access-Control-Expose-Headers':'Retry-After'});
+        return json(result,429,{'Retry-After':retry});
+      }
       return json(result,status,status===401?{'WWW-Authenticate':path==='/mcp'?oauthChallenge(request):'Bearer realm="case-notes"'}:{});
     }
   },

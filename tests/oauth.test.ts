@@ -6,6 +6,9 @@ import { basename, dirname, resolve } from 'node:path';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { migrationSql } from './migrations';
 import { sha256 } from '../src/types';
+import {testRateLimits} from './runtime-rate-limits';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 let mf:Miniflare,auth:D1Database;
 const temp=mkdtempSync(resolve(tmpdir(),'case-notes-oauth-test-')),origin='http://localhost',target=origin+'/mcp';
@@ -36,7 +39,7 @@ const rpc=(token:string,method='tools/list',params:any={})=>fetch('/mcp',{method
 async function grant(){const client=await register(),{code}=await approve(client),r=await exchange(client,code);assert.equal(r.status,200,await r.clone().text());return {client,tokens:await r.json() as any};}
 before(async()=>{
   mf=new Miniflare(convertV4MiniflareOptions({name:'oauth-tests',modules:true,scriptPath:resolve('dist/worker.js'),compatibilityDate:'2026-10-01',compatibilityFlags:['nodejs_compat'],telemetry:{enabled:false},resourcePersistencePath:temp,
-    d1Databases:{DB:'business'},bindings:{WEB_PASSWORD:'synthetic-password'},
+    d1Databases:{DB:'business'},bindings:{WEB_PASSWORD:'synthetic-password'},ratelimits:testRateLimits,
     assets:{directory:resolve('public'),binding:'ASSETS',run_worker_first:['/api/*','/mcp','/health','/oauth/*','/.well-known/*'],routerConfig:{has_user_worker:true}}}));
   auth=await mf.getD1Database('DB') as unknown as D1Database;
   for(const [db,folder] of [[auth,'migrations/business']] as const)
@@ -106,6 +109,35 @@ test('OAuth writes retain client identity and AI permissions in the common servi
   assert.equal(data.result.structuredContent.ok,true);const business=await mf.getD1Database('DB');
   const row=await business.prepare('SELECT client_id,source FROM audit_changes WHERE case_id=?').bind(data.result.structuredContent.data.case_id).first();
   assert.equal(row!.client_id,client.client_id);assert.equal(row!.source,'ai');
+});
+
+test('stateless MCP rejects listening streams and the real SDK stops idle reconnects while tools still work',async()=>{
+  const {tokens}=await grant(),gets:number[]=[],errors:Error[]=[];
+  for(const method of ['GET','DELETE','PUT','OPTIONS']){
+    const r=await fetch('/mcp',{method,headers:{Accept:'text/event-stream'}});
+    assert.equal(r.status,405);assert.equal(r.headers.get('Allow'),'POST');
+    assert.notEqual(r.headers.get('Content-Type'),'text/event-stream');await r.text();
+  }
+  let listening!:()=>void;
+  const probe=new Promise<void>(resolve=>{listening=resolve;});
+  const transport=new StreamableHTTPClientTransport(new URL(target),{
+    requestInit:{headers:{Authorization:'Bearer '+tokens.access_token}},
+    reconnectionOptions:{initialReconnectionDelay:10,maxReconnectionDelay:10,reconnectionDelayGrowFactor:1,maxRetries:2},
+    fetch:async(input,init)=>{
+      const r=await mf.dispatchFetch(String(input),init as any);
+      if(init?.method==='GET'){gets.push(r.status);listening();}
+      return r as unknown as Response;
+    },
+  });
+  const client=new Client({name:'idle-reconnection-test',version:'1'});client.onerror=error=>errors.push(error);
+  try{
+    await client.connect(transport);
+    await Promise.race([probe,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Missing SSE probe')),2000))]);
+    assert.equal((await client.listTools()).tools.length,9);
+    const search=await client.callTool({name:'search',arguments:{query:'合成'}});assert.equal(search.isError,false);
+    await new Promise(resolve=>setTimeout(resolve,100));
+    assert.deepEqual(gets,[405]);assert.deepEqual(errors,[]);
+  }finally{await client.close();}
 });
 test('refresh rotation rejects wrong clients without revocation and revokes the family on reuse, including concurrent refresh',async()=>{
   const {client,tokens}=await grant(),other=await register();assert.equal((await refresh(other,tokens.refresh_token)).status,400);assert.equal((await rpc(tokens.access_token)).status,200);

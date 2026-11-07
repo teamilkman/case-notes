@@ -50,6 +50,8 @@ for(let attempt=0;attempt<6;attempt++){
   try{
     const health=await fetch(url+'/health');
     if(!health.ok)throw new Error('Health check failed');
+    const mcpStream=await fetch(url+'/mcp',{headers:{Accept:'text/event-stream'}});
+    if(mcpStream.status!==405||mcpStream.headers.get('Allow')!=='POST')throw new Error('MCP idle stream must be disabled');
     const mcpDenied=await fetch(url+'/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     if(mcpDenied.status!==401||!mcpDenied.headers.get('WWW-Authenticate')?.includes(`resource_metadata="${url}/.well-known/oauth-protected-resource/mcp"`))throw new Error('MCP OAuth discovery challenge unavailable');
     const protectedResource=await fetch(url+'/.well-known/oauth-protected-resource/mcp'),resourceMetadata=await protectedResource.json();

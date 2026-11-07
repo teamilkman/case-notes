@@ -52,3 +52,32 @@ test('domain handover uses the Wrangler origin endpoint only for the verified so
   moved=false;verified=false;await assert.rejects(run(),/unverified source Worker/);assert.equal(mutations.length,1);
   await assert.rejects(run({ZONE_ID:''}),/Missing Cloudflare deployment configuration/);
 });
+
+test('CI edge protection creates and verifies its own rule, repeats without writes, and preserves unrelated rules',async()=>{
+  const source=readFileSync('tools/configure-edge-rate-limit.mjs','utf8'),mutations:any[]=[];
+  let state:any=null;
+  const fetch=async(url:string,options:any={})=>{
+    const method=options.method??'GET',path=new URL(url).pathname;
+    if(method==='GET'&&!state)return {ok:false,status:404,json:async()=>({success:false,errors:[{code:10003}]})};
+    if(method!=='GET'){
+      const body=JSON.parse(options.body);mutations.push({method,path,body});
+      if(method==='POST'&&path.endsWith('/rulesets'))state={id:'synthetic-ruleset',rules:body.rules.map((r:any)=>({...r,id:'synthetic-owned'}))};
+      else if(method==='PATCH')state.rules=state.rules.map((r:any)=>r.ref===body.ref?{...body,id:r.id}:r);
+      else if(method==='POST')state.rules.push({...body,id:'synthetic-owned'});
+    }
+    return {ok:true,status:200,json:async()=>({success:true,result:state})};
+  };
+  const run=(args:string[]=[],customFetch=fetch)=>runInNewContext(`(async()=>{${source}\n})()`,{fetch:customFetch,process:{env:{ZONE_ID:'synthetic-zone',CLOUDFLARE_API_TOKEN:'synthetic-token'},argv:args},console:{log(){}}});
+  await run(['--check']);assert.equal(mutations.length,0);
+  await run();assert.equal(mutations.length,1);assert.equal(mutations[0].method,'POST');
+  const rule=state.rules[0];assert.equal(rule.expression,'true');assert.equal(rule.action,'block');assert.equal(rule.ratelimit.requests_per_period,100);assert.equal(rule.ratelimit.period,10);
+  await run();assert.equal(mutations.length,1);
+  await run(['--verify']);assert.equal(mutations.length,1);
+  const unrelated={id:'other',ref:'other-project',expression:'http.request.uri.path eq "/other"',enabled:true};state.rules.push(unrelated);
+  state.rules[0].ratelimit.requests_per_period=999;
+  await assert.rejects(run(['--verify']),/readback verification failed/);assert.equal(mutations.length,1);
+  await run();assert.equal(mutations.length,2);assert.equal(mutations[1].method,'PATCH');assert.equal(state.rules[1],unrelated);
+  state.rules=[unrelated];await assert.rejects(run(),/refusing to overwrite unrelated rules/);assert.equal(mutations.length,2);
+  await assert.rejects(run([],async()=>({ok:false,status:403,json:async()=>({success:false,errors:[{code:10000}]})})),/Zone WAF Edit/);
+  state=null;await assert.rejects(run([],async(_url:string,options:any={})=>options.method==='POST'?{ok:true,status:200,json:async()=>({success:true,result:{}})}:{ok:false,status:404,json:async()=>({success:false,errors:[{code:10003}]})}),/readback verification failed/);
+});

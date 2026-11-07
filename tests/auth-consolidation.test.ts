@@ -8,13 +8,14 @@ import { consolidateAuth, authTables, type Database } from '../tools/auth-consol
 import { migrationSql } from './migrations';
 import { sha256 } from '../src/types';
 import { executeTool } from '../src/service';
+import {testRateLimits,allowedRateLimits} from './runtime-rate-limits';
 
 const adapter=(db:D1Database):Database=>({batch:async(statements)=>db.batch(statements.map(s=>db.prepare(s.sql).bind(...(s.params??[]))))});
 async function fixture(run:(source:D1Database,target:D1Database,mf:Miniflare)=>Promise<void>){
   const dir=mkdtempSync(resolve(tmpdir(),'case-notes-auth-merge-'));
   const mf=new Miniflare(convertV4MiniflareOptions({modules:true,scriptPath:resolve('dist/worker.js'),compatibilityDate:'2026-10-01',
     compatibilityFlags:['nodejs_compat'],telemetry:{enabled:false},resourcePersistencePath:dir,
-    d1Databases:{SOURCE:'legacy-auth',DB:'consolidated'},bindings:{WEB_PASSWORD:'synthetic-password'}}));
+    d1Databases:{SOURCE:'legacy-auth',DB:'consolidated'},bindings:{WEB_PASSWORD:'synthetic-password'},ratelimits:testRateLimits}));
   try{
     const source=await mf.getD1Database('SOURCE') as unknown as D1Database,target=await mf.getD1Database('DB') as unknown as D1Database;
     for(const [db,folder] of [[source,'migrations/auth'],[target,'migrations/business']] as const)
@@ -37,7 +38,7 @@ async function seed(source:D1Database){
 
 test('auth consolidation preserves exact records, business identities, revisions, audits and receipts; retries do not reintroduce stale auth',async()=>fixture(async(source,target,mf)=>{
   await seed(source);
-  const env={DB:target,ASSETS:null as any},principal={workspaceId:'personal',clientId:'synthetic',actorId:'owner',source:'ai' as const};
+  const env={DB:target,ASSETS:null as any,...allowedRateLimits},principal={workspaceId:'personal',clientId:'synthetic',actorId:'owner',source:'ai' as const};
   const created:any=await executeTool(env,principal,'cases_create',{name:'合并保留合成案',request_key:'synthetic-create'});
   await executeTool(env,principal,'lines_add',{case_ref:created.data.case_id,text:'重复原文\n\n重复原文',request_key:'synthetic-lines'});
   const businessTables=['cases','log_lines','line_index','operations','audit_changes'];

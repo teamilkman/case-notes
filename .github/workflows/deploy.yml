@@ -60,6 +60,8 @@ jobs:
         run: node tools/render-wrangler.mjs
       - name: Verify Cloudflare credential access
         run: node tools/check-cloudflare-token.mjs
+      - name: Configure and verify edge rate limit
+        run: node tools/configure-edge-rate-limit.mjs
       - name: Apply schema migrations
         run: npx wrangler d1 migrations apply case-notes --remote
       - name: Prepare deployment before domain cutover
@@ -79,5 +81,7 @@ jobs:
         run: npm run deploy -- --config .wrangler/staged-worker.json
       - name: Verify or bind custom domain
         run: node tools/bind-domain.mjs
+      - name: Verify edge rate limit after deployment
+        run: node tools/configure-edge-rate-limit.mjs --verify
       - name: Verify live service
         run: node tools/check-deployment.mjs

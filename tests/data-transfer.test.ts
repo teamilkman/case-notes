@@ -8,6 +8,7 @@ import {migrationSql} from './migrations';
 import {transferDatabase,transferTables,retireTransfer,verifyCopiedFacts} from '../tools/data-transfer';
 import type {Database} from '../tools/auth-consolidation';
 import {executeTool} from '../src/service';
+import {allowedRateLimits} from './runtime-rate-limits';
 const adapter=(db:D1Database):Database=>({batch:async(s)=>db.batch(s.map(q=>db.prepare(q.sql).bind(...(q.params??[]))))});
 async function fixture(run:(source:D1Database,target:D1Database)=>Promise<void>){
   const dir=mkdtempSync(resolve(tmpdir(),'case-notes-transfer-'));
@@ -20,7 +21,7 @@ async function fixture(run:(source:D1Database,target:D1Database)=>Promise<void>)
   }finally{await mf.dispose();assert.ok(dir.startsWith(resolve(tmpdir(),'case-notes-transfer-')));rmSync(dir,{recursive:true});}
 }
 async function seed(db:D1Database){
-  const p={workspaceId:'personal',actorId:'owner',clientId:'synthetic',source:'ai' as const},env={DB:db,ASSETS:null as any};
+  const p={workspaceId:'personal',actorId:'owner',clientId:'synthetic',source:'ai' as const},env={DB:db,ASSETS:null as any,...allowedRateLimits};
   const result:any=await executeTool(env,p,'cases_create',{name:'迁移合成案',request_key:'synthetic-create'});
   await executeTool(env,p,'lines_add',{case_ref:result.data.case_id,text:Array.from({length:205},(_,i)=>i%3===0?'':i%3===1?'重复原文':'- [ ] 合成待办 #等待').join('\n'),request_key:'synthetic-lines'});
   await db.prepare("INSERT INTO operations VALUES('large','personal','synthetic','large','synthetic','synthetic',?,'2026-01-01')").bind(JSON.stringify({payload:'大'.repeat(70_000)})).run();

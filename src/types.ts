@@ -3,6 +3,9 @@ import { PARSER_VERSION } from './parser';
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  API_RATE_LIMITER: RateLimit;
+  AI_RATE_LIMITER: RateLimit;
+  AUTH_RATE_LIMITER: RateLimit;
   WEB_PASSWORD?: string;
   WORKSPACE_ID?: string;
 }
@@ -52,6 +55,7 @@ export function failure(error: unknown) {
     next_action: e.code === 'VERSION_CONFLICT' ? '重新读取并核对当前文字，明确更正后用新键提交。'
         : e.code === 'READ_CHANGED' || e.code === 'CURSOR_EXPIRED' ? '丢弃已收集的页，清除 cursor，按原查询条件从第一页重新读取；不要拼接新旧页。'
       : e.code === 'DAILY_LIMIT_EXCEEDED' ? '停止即时重试，待 details.resets_at 后再读取；写入用原 request_key 和原参数核对回执。'
+      : e.code === 'RATE_LIMITED' ? '停止即时重试，等待 details.retry_after 秒后再请求；写入保留原 request_key 和原参数。'
       : e.code === 'CASE_AMBIGUOUS' ? '选择明确的案件 ID 后再调用。'
       : e.retryable ? '保留原 request_key 与原参数，按退避提示重试。' : e.message }, meta: meta() };
 }
