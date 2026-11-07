@@ -10,6 +10,10 @@ if(target.protocol!=='https:'||target.hostname==='workers.dev'||target.hostname.
 const response=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/case-notes/subdomain`,{headers:{Authorization:`Bearer ${token}`}});
 const result=await response.json();
 if(!response.ok||!result.success||result.result?.enabled!==false||result.result?.previews_enabled!==false)throw new Error('Worker default and preview URLs must be disabled');
+const guardResponse=await fetch(`https://api.cloudflare.com/client/v4/zones/${process.env.ZONE_ID}/rulesets/phases/http_request_firewall_custom/entrypoint`,{headers:{Authorization:`Bearer ${token}`}});
+const guard=await guardResponse.json(),guardRule=guard.result?.rules?.find(rule=>rule.ref==='case_notes_ai_resource_guard');
+if(!guardResponse.ok||!guard.success||!guardRule||typeof guardRule.enabled!=='boolean')throw new Error('Automatic resource guard unavailable');
+const aiPaused=guardRule.enabled;
 const urls=[target.origin];
 const searchArgs={result_type:'cases',scope:'affairs',limit:1};
 function checkQuota(result){
@@ -52,6 +56,12 @@ for(let attempt=0;attempt<6;attempt++){
   try{
     const health=await fetch(url+'/health');
     if(!health.ok)throw new Error('Health check failed');
+    if(aiPaused){
+      for(const path of ['/mcp','/api/v1/search']){
+        const blocked=await fetch(url+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer synthetic-edge-probe'},body:'{}'});
+        if(blocked.status!==403)throw new Error('Automatic AI pause is not enforced at the edge');
+      }
+    }else{
     const mcpStream=await fetch(url+'/mcp',{headers:{Accept:'text/event-stream'}});
     if(mcpStream.status!==405||mcpStream.headers.get('Allow')!=='POST')throw new Error('MCP idle stream must be disabled');
     const mcpDenied=await fetch(url+'/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
@@ -91,6 +101,7 @@ for(let attempt=0;attempt<6;attempt++){
       const next=await fetch(url+'/mcp',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json, text/event-stream',Authorization:`Bearer ${apiToken}`,'MCP-Protocol-Version':'2025-11-25'},body:JSON.stringify({jsonrpc:'2.0',id:'deployment-search-next',method:'tools/call',params:{name:'search',arguments:{...searchArgs,cursor:mcpPage.data.next_cursor}}})});
       const continued=await next.json();checkRead(continued.result?.structuredContent);
       if(!next.ok||continued.result?.isError||continued.result.structuredContent.data.page_start!==mcpPage.data.returned_count)throw new Error('MCP continuation failed');
+    }
     }
     const login=await fetch(url+'/api/login',{method:'POST',headers:{'Content-Type':'application/json',Origin:url},body:JSON.stringify({password:process.env.WEB_PASSWORD})});
     if(!login.ok)checkQuota(await login.json());

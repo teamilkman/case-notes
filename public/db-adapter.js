@@ -5,14 +5,22 @@ import {createReadCache,withSignal} from './read-cache.js';
 import {createPersistentCache} from './persistent-cache.js';
 import {createSessionAccess} from './session-access.js';
 import {appLocation} from './app-location.js';
+import {requestPolicy} from './request-policy.js';
 
 // D1 is authoritative; browser replicas are session-scoped and disposable.
 async function request(path,args,method='POST',signal) {
+  requestPolicy?.check();
   let response;
   try { response=await fetch(path,{method,signal,credentials:'same-origin',cache:'no-store',headers:method==='POST'?{'Content-Type':'application/json'}:{},body:method==='POST'?JSON.stringify(args):undefined}); }
-  catch(error) {if(error.name==='AbortError')throw error;connection.offline=true;const e=new Error('网络不可用，请联网后重试；未保存笔记请保留。');e.code='NETWORK_UNAVAILABLE';e.retryable=true;throw e; }
+  catch(error) {if(error.name==='AbortError')throw error;requestPolicy?.failure();connection.offline=true;const e=new Error('网络不可用，请联网后重试；未保存笔记请保留。');e.code='NETWORK_UNAVAILABLE';e.retryable=true;throw e; }
+  if(response.status===429&&requestPolicy){
+    requestPolicy.limit(response);
+    const limited=await response.json().catch(()=>null);requestPolicy.limit(response,limited?.error?.details?.retry_after);
+    throw requestPolicy.error();
+  }
   let j;
-  try{j=await response.json();}catch{const e=new Error('响应中断，请重试；系统会核对原请求是否已保存。');e.retryable=true;throw e;}
+  try{j=await response.json();}catch{requestPolicy?.failure();const e=new Error('响应中断，请重试；系统会核对原请求是否已保存。');e.retryable=true;throw e;}
+  if(response.status>=500)requestPolicy?.failure();
   if(!j.ok){
     let localOnly=false;
     if(response.status===401&&path!=='/api/session'){
@@ -22,7 +30,7 @@ async function request(path,args,method='POST',signal) {
     }
     const e=new Error(localOnly?'需要重新登录才能同步，现有本地副本仍可离线查看。':j.error?.message||'请求失败');e.code=localOnly?'OFFLINE_AUTH_REQUIRED':j.error?.code;e.status=response.status;e.retryable=j.error?.retryable;e.commitState=j.error?.commit_state;throw e;
   }
-  return j.data;
+  requestPolicy?.success();return j.data;
 }
 const api=(name,args={})=>request('/api/v1/'+name,args);
 async function all(name,args={}) {

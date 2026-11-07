@@ -1,3 +1,4 @@
+import {requestPolicy} from './request-policy.js';
 // 法定节假日（数据来源 NateScarlet/holiday-cn）：由本站 Worker 代理并做边缘缓存，
 // 浏览器只访问同源接口；本机副本在接口失败或离线时继续使用已有年份。
 const PREFIX = 'case-notes:holidays:v1:';
@@ -41,7 +42,9 @@ function write(year, days, savedAt) {
 }
 
 async function fetchYear(year) {
+  requestPolicy?.check();
   const response = await fetch('/api/holidays?year=' + year, { credentials: 'same-origin', cache: 'no-store' });
+  if(response.status===429&&requestPolicy){requestPolicy.limit(response);throw requestPolicy.error();}
   const body = await response.json().catch(() => null);
   if (!body?.ok) throw new Error(body?.error?.message || '法定节假日数据读取失败');
   return body.data?.days || [];

@@ -6,6 +6,10 @@ export interface Env {
   API_RATE_LIMITER: RateLimit;
   AI_RATE_LIMITER: RateLimit;
   AUTH_RATE_LIMITER: RateLimit;
+  RESOURCE_GUARD_TOKEN?: string;
+  GUARD_ACCOUNT_ID?: string;
+  GUARD_ZONE_ID?: string;
+  GUARD_HOSTNAME?: string;
   WEB_PASSWORD?: string;
   WORKSPACE_ID?: string;
 }

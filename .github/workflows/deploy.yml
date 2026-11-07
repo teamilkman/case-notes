@@ -40,6 +40,8 @@ jobs:
       D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
       REQUIRE_DEPLOYMENT_CONFIG: "1"
       WEB_PASSWORD: ${{ secrets.WEB_PASSWORD }}
+      RESOURCE_GUARD_TOKEN: ${{ secrets.RESOURCE_GUARD_TOKEN }}
+      RESOURCE_ALERT_EMAIL: ${{ secrets.RESOURCE_ALERT_EMAIL }}
     steps:
       - name: Check deployment credentials
         run: |
@@ -50,6 +52,8 @@ jobs:
           test -n "$ZONE_ID" || { echo 'Missing ZONE_ID'; exit 1; }
           test -n "$D1_DATABASE_ID" || { echo 'Missing D1_DATABASE_ID'; exit 1; }
           test -n "$WEB_PASSWORD" || { echo 'Missing WEB_PASSWORD'; exit 1; }
+          test -n "$RESOURCE_GUARD_TOKEN" || { echo 'Missing RESOURCE_GUARD_TOKEN'; exit 1; }
+          test -n "$RESOURCE_ALERT_EMAIL" || { echo 'Missing RESOURCE_ALERT_EMAIL'; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -62,6 +66,8 @@ jobs:
         run: node tools/check-cloudflare-token.mjs
       - name: Configure and verify edge rate limit
         run: node tools/configure-edge-rate-limit.mjs
+      - name: Configure automatic resource guard and native alerts
+        run: npx tsx tools/configure-resource-guard.ts
       - name: Apply schema migrations
         run: npx wrangler d1 migrations apply case-notes --remote
       - name: Prepare deployment before domain cutover
@@ -69,7 +75,7 @@ jobs:
       - name: Configure runtime secrets
         if: env.WEB_PASSWORD != ''
         run: |
-          node -e 'process.stdout.write(JSON.stringify({WEB_PASSWORD:process.env.WEB_PASSWORD}))' | npx wrangler secret bulk --config .wrangler/staged-worker.json
+          node -e 'process.stdout.write(JSON.stringify({WEB_PASSWORD:process.env.WEB_PASSWORD,RESOURCE_GUARD_TOKEN:process.env.RESOURCE_GUARD_TOKEN,GUARD_ACCOUNT_ID:process.env.CLOUDFLARE_ACCOUNT_ID,GUARD_ZONE_ID:process.env.ZONE_ID,GUARD_HOSTNAME:process.env.DOMAIN}))' | npx wrangler secret bulk --config .wrangler/staged-worker.json
       - name: Mask deployment addresses in logs
         run: |
           node -e 'if(process.env.DEPLOYMENT_URL)console.log(`::add-mask::${new URL(process.env.DEPLOYMENT_URL).origin}`)'
@@ -79,5 +85,7 @@ jobs:
         run: node tools/bind-domain.mjs
       - name: Verify edge rate limit after deployment
         run: node tools/configure-edge-rate-limit.mjs --verify
+      - name: Verify automatic guard and native alerts
+        run: npx tsx tools/configure-resource-guard.ts --verify
       - name: Verify live service
         run: node tools/check-deployment.mjs

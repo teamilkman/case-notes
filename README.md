@@ -65,7 +65,7 @@ npm test
 | `public/db-adapter.js`、`session-access.js`、`editor.js`、`paging.js`、`read-cache.js`、`persistent-cache.js` | 数据适配、网页会话与离线核验、行身份维护、连续分页、响应式内存缓存与会话隔离的 Dexie 持久缓存 |
 | `migrations/business/`、`migrations/auth/` | 统一数据库的结构迁移与旧鉴权库迁移历史 |
 | `tests/` | 隔离数据库、接口和前端逻辑测试 |
-| `tools/` | 环境初始化、部署配置渲染、本地备份、域名配置与线上核验 |
+| `tools/` | 环境初始化、部署配置渲染、本地备份、域名与资源防护配置、线上核验 |
 | `android/` | 安卓 Web 套壳：单 WebView 打开本机填写的服务器域名，包名 `com.teamilkman.casenotes` |
 | `.github/workflows/deploy.yml` | 检查与 CI 发布流程 |
 | `.github/workflows/android-apk.yml` | 安卓质量核验（每周定时/手动/PR）：构建、单元测试与模拟器检查，不阻塞发布 |
@@ -92,6 +92,16 @@ OAuth 提供资源与授权服务器发现、动态客户端注册、S256 PKCE �
 | `line_index` | 有效行的派生类型、日期、待办状态与期限、日程及诊断；案件键和日期索引支持最近活动与日期范围读取 |
 | `operations`、`audit_changes`、`write_guards` | 幂等回执、修改前后留痕与事务内版本保护 |
 | `read_snapshots`、`read_snapshot_rows` | 已停用的历史结构，当前查询不读写 |
+
+### 自动资源防护
+
+Cloudflare 原生 Monitors 每 5 分钟查询一次分析数据：全账号 UTC 当天 Worker 调用量达到 5 万次提醒、8 万次紧急提醒；案记最近 5 分钟达到 300 次调用时提醒。所有状态码均计数，不把持续返回 200 的重连当作正常；提醒由 Cloudflare 自行发送到 `RESOURCE_ALERT_EMAIL`，不用另建发信服务。每日提醒重复间隔 24 小时，短时提醒重复间隔 1 小时。查询使用带采样权重的原生分析数据，不读取日志正文、凭证或卷宗。已有其他通知策略保持不变。
+
+Worker 的定时任务每 5 分钟复查同一份分析数据，每天最多 288 次计划执行，不在浏览器轮询，也不高频运行 GitHub CI。账号当天达到 8 万次时，自动在边缘暂停 MCP 和带 Authorization 的 AI REST 请求，等 UTC 次日零点（北京时间 08:00）后复查用量再恢复；网页 Cookie 会话及网页使用的 REST 仍放行。案记最近 5 分钟达到 300 次，或至少 100 次且达到此前 30 分钟平均每 5 分钟用量的 10 倍时，同样暂停 AI；首次冷却 15 分钟，短期反复异常延长到 30、60 分钟。冷却结束后需重新读取指标，仍异常则续停，恢复不主动调用任何 AI 工具。无手动暂停开关。
+
+自动状态保存在本项目 WAF 自定义规则的描述与启用状态中，不写业务 D1；发布保留当前冷却，不会重新开放已暂停的入口。指标缺失、请求失败、状态不合法或检测到并发更新时不自动恢复，等后续定时任务重查。`RESOURCE_GUARD_TOKEN` 是仅具账号分析读取及部署区域 WAF 编辑权限的独立运行时 Secret，不使用 CI 的部署令牌。定时器、分析数据和规则传播均可能延迟，因此这是尽力保护，不是全局精确每日额度硬上限。
+
+浏览器统一遵守 Retry-After，限流期间的新读取和写入在本机停止，不排队补发；迟到成功响应不清除其他请求的冷却。连续网络/响应失败按 1、2 秒退避，第三次起冷却 60 秒；只有登录的网络失败最多自动尝试三次，并增加随机间隔，认证拒绝、限流和服务器错误不自动重试。业务写入仍仅由用户操作重试，保留原请求键及草稿；不增加后台刷新。第三方 MCP 客户端遵守服务器的 405/429 语义，项目不会修改外部客户端配置。
 
 ### 写入与查询
 
@@ -144,10 +154,12 @@ AI 查询使用只读排序键游标，不创建或清理持久快照。每页�
 | Cloudflare 账户 | `CLOUDFLARE_ACCOUNT_ID` | `CLOUDFLARE_ACCOUNT_ID` |
 | 部署地址与自定义域名 | `DEPLOYMENT_URL`、`DOMAIN` | `DEPLOYMENT_URL`、`DOMAIN` |
 | 区域与数据库标识 | `ZONE_ID`、`D1_DATABASE_ID` | `ZONE_ID`、`D1_DATABASE_ID` |
+| 原生资源告警收件人 | `RESOURCE_ALERT_EMAIL`（仅 CI） | `RESOURCE_ALERT_EMAIL` |
+| 自动防护运行时令牌 | `RESOURCE_GUARD_TOKEN` | `RESOURCE_GUARD_TOKEN` |
 
 需要更新 CI 凭证时，`node tools/setup-ci-secrets.mjs` 可将 `.dev.vars` 中对应值提交到 GitHub Secrets，不输出凭证；目标仓库默认 `teamilkman/case-notes`，可用 `CI_REPO` 覆盖。Cloudflare 账户管理凭证与日志应用令牌用途不同。部署地址与标识同样按 Secret 处理：CI 运行时把它们渲染进 `wrangler.jsonc`，输出日志中的取值会被 GitHub 掩码成 `***`。运行时登录密码只在提供了 `WEB_PASSWORD` 时才重新同步，未提供时保留云端现有值。
 
-`CLOUDFLARE_API_TOKEN` 还需部署区域的 `Zone WAF Edit` 权限，用于边缘限流规则的读取、创建和更新；缺少权限时 CI 明确失败，不将边缘防护记为已启用。
+`CLOUDFLARE_API_TOKEN` 还需部署区域的 `Zone WAF Edit`、账号 `Account Analytics Read` 和 `Notifications Write` 权限，用于边缘规则及 Cloudflare 原生提醒的配置、查询预览和回读核验；缺少权限时 CI 明确失败，不将防护记为已启用。`RESOURCE_GUARD_TOKEN` 不需要 Worker 部署、通知发送或 D1 权限。CI 将既有账号、区域、域名标识分别写入 Worker 的 `GUARD_ACCOUNT_ID`、`GUARD_ZONE_ID`、`GUARD_HOSTNAME` Secret，不提交标识取值。部署时同步定时任务和原生提醒；线上核验识别自动冷却，暂停期间验证边缘拦截及网页正常访问，不为核验而解除冷却。
 
 线上核验先检查默认地址和版本预览地址均已关闭，仅在自定义域名用网页密码换取一个 OAuth 令牌，再覆盖 OAuth 发现挑战与元数据、MCP 初始化说明与 OpenAPI 描述的同源一致性、工具发现与调用、登录/退出、未认证拒绝、网页数据库列表及出现续页时的游标读取；搜索限定事务，以小页长分别核验 REST 和 MCP 的只读分页，不向正式日志写测试记录。OAuth 授权、兑换、续期与撤销在隔离 Miniflare/D1 测试中核验。识别到每日 D1 额度错误后停止即时重试，接口返回明确错误和 UTC 重置时刻。以对应提交的 CI 结果判断是否已部署，不把本地构建成功当作上线成功。
 

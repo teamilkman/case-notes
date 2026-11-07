@@ -8,6 +8,7 @@ import { webRead } from './web-queries';
 import { holidayCalendar } from './holidays';
 import { handleOAuth, oauthChallenge } from './oauth';
 import { limitRequest, limitPrincipal } from './rate-limit';
+import {runResourceGuard} from './resource-guard';
 
 function json(data:unknown,status=200,extra:Record<string,string>={}) {
   return Response.json(data,{status,headers:{'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff',...extra}});
@@ -35,6 +36,9 @@ const makeOpenapi=()=>{
 let openapi:ReturnType<typeof makeOpenapi>|undefined;
 
 export default {
+  async scheduled(_event:ScheduledController,env:Env,ctx:ExecutionContext) {
+    ctx.waitUntil(runResourceGuard(env).then(result=>{console.log(JSON.stringify({resource_guard:result.state.reason,changed:result.changed,daily:result.metrics.daily,recent:result.metrics.recent}));}));
+  },
   async fetch(request:Request,env:Env,ctx:ExecutionContext):Promise<Response> {
     const url=new URL(request.url),path=url.pathname;
     try {

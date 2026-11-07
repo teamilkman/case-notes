@@ -321,15 +321,17 @@ test('live verification requires disabled default and preview URLs and exercises
   for(const name of ['续页核验事务一','续页核验事务二'])await call('cases_create',{name,kind:'affair',request_key:key()});
   const source=readFileSync('tools/check-deployment.mjs','utf8'),searches:any[]=[],waits:number[]=[];
   const config={CLOUDFLARE_ACCOUNT_ID:'synthetic-account',CLOUDFLARE_API_TOKEN:'synthetic-deployment-token',
-    WEB_PASSWORD:'test-password',DEPLOYMENT_URL:'https://synthetic-domain.test'};
+    WEB_PASSWORD:'test-password',DEPLOYMENT_URL:'https://synthetic-domain.test',ZONE_ID:'synthetic-zone'};
   const before=(await env.DB.prepare('SELECT COUNT(*) AS n FROM read_snapshots').first<any>()).n;
-  let quota=false,attempts=0;const hosts=new Set<string>(),endpointState={enabled:false,previews_enabled:false};
+  let quota=false,attempts=0,aiPaused=false;const hosts=new Set<string>(),endpointState={enabled:false,previews_enabled:false};
   const fakeFetch=async(url:string,options:any={})=>{
     if(new URL(url).host==='api.cloudflare.com'){
+      if(new URL(url).pathname.includes('/rulesets/'))return Response.json({success:true,result:{rules:[{ref:'case_notes_ai_resource_guard',enabled:aiPaused}]}});
       assert.equal(new URL(url).pathname,'/client/v4/accounts/synthetic-account/workers/scripts/case-notes/subdomain');
       return Response.json({success:true,result:endpointState});
     }
     hosts.add(new URL(url).origin);
+    if(aiPaused&&['/mcp','/api/v1/search'].includes(new URL(url).pathname))return new Response('blocked at edge',{status:403});
     const body=options.body&&String(options.headers?.['Content-Type']??'').startsWith('application/json')?JSON.parse(String(options.body)):null;
     const authenticated=new URL(url).pathname==='/api/v1/search'&&options.headers?.Authorization;
     if(authenticated){attempts++;if(quota)return Response.json(failure(new Error("Your account has exceeded D1's free tier daily row read limit.")),{status:503});}
@@ -346,6 +348,7 @@ test('live verification requires disabled default and preview URLs and exercises
   assert.equal(searches.filter(s=>s.page_start===1).length,2);assert.deepEqual([...hosts],[config.DEPLOYMENT_URL]);
   assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM read_snapshots').first<any>()).n,before);
   assert.equal(waits.length,0);
+  aiPaused=true;const priorSearches=searches.length;await run();assert.equal(searches.length,priorSearches);aiPaused=false;
   endpointState.enabled=true;await assert.rejects(run(),/default and preview URLs must be disabled/);endpointState.enabled=false;
   endpointState.previews_enabled=true;await assert.rejects(run(),/default and preview URLs must be disabled/);endpointState.previews_enabled=false;
   config.DEPLOYMENT_URL='https://synthetic.workers.dev';await assert.rejects(run(),/requires the HTTPS custom domain/);config.DEPLOYMENT_URL='https://synthetic-domain.test';
