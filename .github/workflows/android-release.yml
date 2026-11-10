@@ -1,7 +1,7 @@
 name: Release Android APK
 
-# Delivery only: build, sign and publish. The emulator quality gate lives in the
-# separate Build Android APK workflow so a flaky emulator node cannot delay it.
+# Delivery only: build, sign and publish. The build and unit-test quality gate
+# lives in the separate Android quality check workflow.
 on:
   workflow_dispatch:
   push:

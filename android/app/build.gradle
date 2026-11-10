@@ -10,7 +10,6 @@ android {
         applicationId 'com.teamilkman.casenotes'
         minSdk 24
         targetSdk 34
-        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         // 套壳版本号：发新包时同步递增 versionCode，versionName 对外展示。
         versionCode 27
         versionName '2.4.3'
@@ -68,9 +67,6 @@ tasks.register('printVersionCode') {
 
 dependencies {
     implementation 'androidx.core:core:1.13.1'
-    androidTestImplementation 'androidx.test:runner:1.6.2'
-    androidTestImplementation 'androidx.test:core:1.6.1'
-    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.robolectric:robolectric:4.17'
 }
