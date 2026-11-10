@@ -210,7 +210,6 @@
           </article>
         </div>
         <button class="cal-next" v-if="!calendarUnavailable&&nextHearing" @click="select(nextHearing[0])"><span>本月下一开庭日<b>{{ Number(nextHearing[0].slice(5,7)) }}月{{ Number(nextHearing[0].slice(8)) }}日 · {{ nextHearing[1].length }}场</b></span><span aria-hidden="true">→</span></button>
-        <p class="cal-detail-foot">日程随案件笔记保存更新</p>
       </aside>
     </div>
     <div class="hm-wrap" :class="{'heat-unavailable':!heatReady}" :aria-busy="calendarLoading&&!heatReady">
@@ -335,11 +334,11 @@
           <div v-if="item==='write'" class="md-left"><span class="editor-pane-label">笔记正文</span>
             <div class="md-toolbar" @touchstart="toolbarTouchStart" @touchend="toolbarTouchEnd" @touchcancel="toolbarTouchCancel">
               <span role="button" class="mini-btn" data-toolbar="schedule" :tabindex="$state.mobile?null:0" :aria-disabled="saving||null" title="弹窗填写日期时间正文，插入到光标所在行的下一行" @click="toolbarClick('schedule')" @keydown.enter.prevent="toolbarClick('schedule')" @keydown.space.prevent="toolbarClick('schedule')"><ui-icon name="calendar"></ui-icon>插入日程</span>
-              <span role="button" class="mini-btn" data-toolbar="todo" :tabindex="$state.mobile?null:0" :aria-disabled="saving||null" title="行首复选框循环切换：无 ↔ - [ ]；- [x] 已完成项不参与切换" @click="toolbarClick('todo')" @keydown.enter.prevent="toolbarClick('todo')" @keydown.space.prevent="toolbarClick('todo')"><ui-icon name="check"></ui-icon>切换待办</span>
+              <span role="button" class="mini-btn" data-toolbar="todo" :tabindex="$state.mobile?null:0" :aria-disabled="saving||null" title="为当前行添加或取消待办，已完成项不参与切换" @click="toolbarClick('todo')" @keydown.enter.prevent="toolbarClick('todo')" @keydown.space.prevent="toolbarClick('todo')"><ui-icon name="check"></ui-icon>切换待办</span>
               <span v-if="$state.mobile" class="edit-state">{{ editStatus }}</span>
             </div>
             <textarea ref="editor" class="md-editor" name="md-editor" aria-label="案件笔记正文" :value="editText" :disabled="saving" @input="noteInput" @compositionend="noteInput" @beforeinput="beforeNoteInput" spellcheck="false"
-                      placeholder="在此编辑 Markdown 笔记（支持 - 列表、📅 日程、[ ] 待办、## 标题、--- 分隔块等，保存到数据库）"></textarea>
+                      placeholder="在此编辑笔记正文（支持 - 列表、📅 日程、[ ] 待办、## 标题、--- 分隔块等）"></textarea>
           </div>
           <div v-if="item==='preview'" class="md-preview"><span class="editor-pane-label">阅读预览</span><div class="md-body" v-html="editRendered"></div><p class="preview-empty" v-if="!editText">笔记预览将在这里显示</p></div>
           </template>
@@ -365,9 +364,8 @@
     </page-deck>
     <teleport to="body"><transition name="dialog">
       <div v-if="createDlg" class="dlg-mask" @click.self="closeCreate">
-        <form class="dlg create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-title" aria-describedby="create-hint" @submit.prevent="submitCreate" @keydown="createKey">
+        <form class="dlg create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-title" @submit.prevent="submitCreate" @keydown="createKey">
           <div class="dlg-head"><h3 id="create-title">新建笔记</h3><button type="button" class="icon-btn" aria-label="关闭新建笔记窗口" :disabled="saving" @click="closeCreate"><ui-icon name="close"></ui-icon></button></div>
-          <p id="create-hint">创建后进入编辑，记录笔记正文。</p>
           <label for="create-name">名称</label><input ref="createName" id="create-name" v-model="createName" required maxlength="200" autocomplete="off" :readonly="createPending" :disabled="saving" placeholder="填写案件或事务名称">
           <label class="create-kind-label" for="create-kind">类型</label><select id="create-kind" v-model="createKind" :disabled="saving||createPending"><option value="case">案件</option><option value="affair">事务</option></select>
           <p v-if="createPending" class="create-pending" role="status">上次创建结果尚未确认，请重试以核对结果。</p>
