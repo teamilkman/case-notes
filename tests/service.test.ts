@@ -7,7 +7,7 @@ import { runInNewContext } from 'node:vm';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { executeTool, completeTodo, saveNotes } from '../src/service';
 import { webRead } from '../src/web-queries';
-import { AppError, failure, type Env, type Principal } from '../src/types';
+import { AppError, failure, sha256, type Env, type Principal } from '../src/types';
 import { parseLine, PARSER_VERSION } from '../src/parser';
 import { instructions, descriptions, outputSchemas, errorResponseSchema, type ToolName } from '../src/schemas';
 import { migrationSql } from './migrations';
@@ -71,7 +71,7 @@ before(async()=>{
   mf=new Miniflare(convertV4MiniflareOptions({name:'case-notes-test',modules:true,scriptPath:resolve('dist/worker.js'),compatibilityDate:'2026-10-01',compatibilityFlags:['nodejs_compat'],
     telemetry:{enabled:false},resourcePersistencePath:temp,d1Databases:{DB:'test-business'},
     bindings:{WEB_PASSWORD:'test-password',WORKSPACE_ID:'personal'},ratelimits:testRateLimits,
-    assets:{directory:resolve('public'),binding:'ASSETS',run_worker_first:['/api/*','/mcp','/health','/oauth/*','/.well-known/*'],routerConfig:{has_user_worker:true}}}));
+    assets:{directory:resolve('public'),binding:'ASSETS',run_worker_first:['/','/index.html','/login.html','/api/*','/mcp','/health','/oauth/*','/.well-known/*'],routerConfig:{has_user_worker:true}}}));
   const db=await mf.getD1Database('DB');
   for(const [database,folder] of [[db,'migrations/business']] as const)
     for(const file of readdirSync(folder).filter(f=>f.endsWith('.sql')).sort())
@@ -737,6 +737,35 @@ test('web login uses HttpOnly sessions, cross-origin writes rejected and logout 
   await mf.dispatchFetch('http://localhost/api/logout',{method:'POST',headers:{Cookie:anotherCookie,Origin:'http://localhost'},body:'{}'});
   assert.equal((await mf.dispatchFetch('http://localhost/api/logout',{method:'POST',headers:{Cookie:cookie,Origin:'http://localhost'},body:'{}'})).status,200);
   assert.equal((await mf.dispatchFetch('http://localhost/api/session',{headers:{Cookie:cookie}})).status,401);
+});
+test('plain HTTP shell and login navigations upgrade to HTTPS before authentication',async()=>{
+  const home=await mf.dispatchFetch('http://shell.example/',{redirect:'manual'});
+  assert.equal(home.status,308);assert.equal(home.headers.get('Location'),'https://shell.example/');
+  const login=await mf.dispatchFetch('http://shell.example/login.html?next=%2F',{redirect:'manual'});
+  assert.equal(login.status,308);assert.equal(login.headers.get('Location'),'https://shell.example/login.html?next=%2F');
+  // API fetches stay on their origin: credentials:'same-origin' would be
+  // dropped across a scheme change, turning the redirect into a 401 loop.
+  assert.equal((await mf.dispatchFetch('http://shell.example/api/session',{redirect:'manual'})).status,401);
+  assert.equal((await mf.dispatchFetch('http://localhost/',{redirect:'manual'})).status,200);
+});
+test('an active web session renews its lifetime and cookie without changing its cache scope',async()=>{
+  const db=await mf.getD1Database('DB') as unknown as D1Database;
+  const logged=await mf.dispatchFetch('http://localhost/api/login',{method:'POST',headers:{Origin:'http://localhost','Content-Type':'application/json'},body:JSON.stringify({password:'test-password'})});
+  const cookie=logged.headers.get('set-cookie')!.split(';')[0],token=cookie.slice(cookie.indexOf('=')+1);
+  const read=async(c:string)=>await mf.dispatchFetch('http://localhost/api/session',{headers:{Cookie:c}});
+  const before=(await (await read(cookie)).json() as any).data;
+  await db.prepare('UPDATE web_sessions SET expires_at=? WHERE token_hash=?')
+    .bind(new Date(Date.now()+10*86400_000).toISOString(),await sha256(token)).run();
+  const renewed=await read(cookie),set=renewed.headers.get('set-cookie');
+  assert.ok(set);assert.equal(set!.split(';')[0],cookie);
+  const after=(await renewed.json() as any).data;
+  assert.equal(after.cache_scope,before.cache_scope);
+  assert.ok(Date.parse(after.expires_at)>Date.now()+25*86400_000);
+  const row=await db.prepare('SELECT expires_at FROM web_sessions WHERE token_hash=?').bind(await sha256(token)).first<any>();
+  assert.equal(row.expires_at,after.expires_at);
+  const stable=await read(cookie);
+  assert.equal(stable.headers.get('set-cookie'),null);
+  assert.equal((await stable.json() as any).data.cache_scope,before.cache_scope);
 });
 test('the session change token moves only on committed business writes',async()=>{
   const logged=await mf.dispatchFetch('http://localhost/api/login',{method:'POST',headers:{Origin:'http://localhost','Content-Type':'application/json'},body:JSON.stringify({password:'test-password'})});

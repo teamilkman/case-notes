@@ -66,6 +66,8 @@ jobs:
         run: node tools/check-cloudflare-token.mjs
       - name: Configure and verify edge rate limit
         run: node tools/configure-edge-rate-limit.mjs
+      - name: Configure and verify HTTPS enforcement
+        run: node tools/configure-https.mjs
       - name: Configure automatic resource guard and native alerts
         run: npx tsx tools/configure-resource-guard.ts
       - name: Apply schema migrations
@@ -85,6 +87,8 @@ jobs:
         run: node tools/bind-domain.mjs
       - name: Verify edge rate limit after deployment
         run: node tools/configure-edge-rate-limit.mjs --verify
+      - name: Verify HTTPS enforcement after deployment
+        run: node tools/configure-https.mjs --verify
       - name: Verify automatic guard and native alerts
         run: npx tsx tools/configure-resource-guard.ts --verify
       - name: Verify live service

@@ -18,7 +18,7 @@ export interface Principal {
   clientId: string;
   actorId: string;
   source: 'ai' | 'web';
-  webSession?: {cacheScope:string;expiresAt:string;cookieUpgrade?:string[]};
+  webSession?: {cacheScope:string;expiresAt:string;cookieUpgrade?:string[];cookieRefresh?:string[]};
 }
 export interface CaseRow {
   id: string; workspace_id: string; name: string;

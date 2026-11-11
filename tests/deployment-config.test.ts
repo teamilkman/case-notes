@@ -55,6 +55,33 @@ test('domain handover uses the Wrangler origin endpoint only for the verified so
   await assert.rejects(run({ZONE_ID:''}),/Missing Cloudflare deployment configuration/);
 });
 
+test('CI HTTPS enforcement enables redirects and HSTS, repeats without writes and preserves other settings',async()=>{
+  const source=readFileSync('tools/configure-https.mjs','utf8'),mutations:any[]=[];
+  let state:any={https:{id:'always_use_https',value:'off'},header:{id:'security_header',value:{strict_transport_security:{enabled:false,max_age:0,include_subdomains:false,preload:false,nosniff:false}}}};
+  const fetch=async(url:string,options:any={}):Promise<any>=>{
+    const method=options.method??'GET',path=new URL(url).pathname;
+    if(method!=='GET'){
+      const body=JSON.parse(options.body);mutations.push({method,path,body});
+      if(path.endsWith('/always_use_https'))state.https={id:'always_use_https',value:body.value};
+      else if(path.endsWith('/security_header'))state.header={id:'security_header',value:body.value};
+    }
+    const result=path.endsWith('/always_use_https')?state.https:path.endsWith('/security_header')?state.header:null;
+    return {ok:true,status:200,json:async()=>({success:true,result})};
+  };
+  const run=(args:string[]=[],customFetch=fetch)=>runInNewContext(`(async()=>{${source}\n})()`,{fetch:customFetch,process:{env:{ZONE_ID:'synthetic-zone',CLOUDFLARE_API_TOKEN:'synthetic-token'},argv:args},console:{log(){}}});
+  await run(['--check']);assert.equal(mutations.length,0);
+  await run();assert.equal(mutations.length,2);
+  assert.equal(mutations[0].body.value,'on');
+  assert.deepEqual(mutations[1].body.value.strict_transport_security,{enabled:true,max_age:15552000,include_subdomains:true,preload:false,nosniff:true});
+  await run();assert.equal(mutations.length,2);
+  await run(['--verify']);assert.equal(mutations.length,2);
+  state.https.value='off';await assert.rejects(run(['--verify']),/readback verification failed/);
+  state.https.value='on';state.header.value.strict_transport_security.max_age=3600;await assert.rejects(run(['--verify']),/readback verification failed/);
+  await run();assert.equal(mutations.length,3);assert.equal(state.header.value.strict_transport_security.max_age,15552000);
+  await assert.rejects(run([],async()=>({ok:false,status:403,json:async()=>({success:false,errors:[{code:10000}]})})),/Zone Settings Edit/);
+  await assert.rejects(runInNewContext(`(async()=>{${source}\n})()`,{fetch,process:{env:{},argv:[]},console:{log(){}}}),/Missing HTTPS enforcement configuration/);
+});
+
 test('CI edge protection creates and verifies its own rule, repeats without writes, and preserves unrelated rules',async()=>{
   const source=readFileSync('tools/configure-edge-rate-limit.mjs','utf8'),mutations:any[]=[];
   let state:any=null;

@@ -40,7 +40,7 @@ npm run dev
 
 `setup:local` 应用本地结构迁移，在 `.dev.vars` 不存在时生成随机网页登录密码；不导入日志。已有环境启动只需 `npm run dev`，也可使用 `start.cmd`。`wrangler.jsonc` 由 `tools/render-wrangler.mjs` 从 `wrangler.template.jsonc` 与 `.dev.vars`/环境变量生成，本身不进版本库；`npm run dev`、`npm run build`、`npm run db:migrate` 与部署前都会自动生成一次，本地缺少部署值时使用占位域名。
 
-网页地址为 `http://127.0.0.1:8787`，MCP 为 `http://127.0.0.1:8787/mcp`。用 `.dev.vars` 中的 `WEB_PASSWORD` 登录；MCP 客户端通过 OAuth 登录授权后即可连接。更新已有本地环境时运行 `npm run db:migrate` 应用统一数据库迁移。本地数据库身份保持稳定，目录改名时 `.wrangler/` 一起保留。本地库与云端库独立，修改不会自动同步。
+网页地址为 `http://127.0.0.1:8787`，MCP 为 `http://127.0.0.1:8787/mcp`；本地回环与内网 IP 保持 HTTP，不触发线上 HTTPS 跳转。用 `.dev.vars` 中的 `WEB_PASSWORD` 登录；MCP 客户端通过 OAuth 登录授权后即可连接。更新已有本地环境时运行 `npm run db:migrate` 应用统一数据库迁移。本地数据库身份保持稳定，目录改名时 `.wrangler/` 一起保留。本地库与云端库独立，修改不会自动同步。
 
 ```powershell
 npm run typecheck
@@ -75,11 +75,13 @@ npm test
 
 ### 鉴权与数据
 
-网页会话与 AI OAuth 令牌分别鉴权，REST 与 MCP 调用同一业务服务。AI 访问只通过 OAuth 登录授权，没有固定令牌；OAuth 使用现有网页登录密码或有效网页会话确认授权，不需要第三方账号或新增 Secret。
+网页会话与 AI OAuth 令牌分别鉴权，REST 与 MCP 调用同一业务服务。AI 访问只通过 OAuth 登录授权，没有固定令牌；OAuth 使用现有网页登录密码或有效网页会话确认授权，不需要第三方账号或新增 Secret。网页会话有效期 30 天；剩余不足 15 天时在已认证访问中自动续期至 30 天并重发 Cookie，令牌与缓存范围不变，活跃用户不因固定到期日被集中要求重新登录。
 
 MCP 使用无状态 POST/JSON 请求响应，不提供独立 SSE 监听流；其他方法直接返回 405 与 `Allow: POST`，不访问数据库或创建传输实例，避免空闲连接关闭后自动重连。动态接口在解析请求体与数据库鉴权前通过 Workers Rate Limiting binding 按 IP 共用每分钟 120 次的计数，登录与 OAuth 另按 IP 共用每分钟 20 次；认证后的 AI 请求在 REST 与 MCP 间按工作空间和 OAuth 客户端共用每分钟 30 次，不因刷新令牌或切换 IP 重置。网页预加载不占 AI 客户端计数。超限返回 429、`Retry-After` 与明确的未提交状态；OAuth 保持自身错误格式。原有失败登录限流继续保留。计数不写 D1，按 Cloudflare 数据中心近似执行，不是全局精确配额。
 
 CI 同步维护专用部署区域的全站免费 WAF 边缘规则：每 IP 10 秒 100 次，超限拦截 10 秒，在 Worker 执行前拦截以减少调用额度消耗。规则作用于整个 Zone 的全部主机、路径和方法，页面、静态资源、API、MCP 都计数，阈值为首次页面加载和框架预缓存留有余量；该区域专用于案记，后续子域名也共享计数。默认 `workers.dev` 地址和版本预览地址均关闭，网页、REST 与 MCP 统一使用自定义域名，避免绕过区域边缘防护；CI 回读核验两类入口保持关闭。CI 通过稳定规则 ref 创建或更新并回读核验，不替换整个规则集；免费规则名额被其他规则占用时中止发布，不覆盖他人规则。应用内限流本身仍消耗 Worker 调用，边缘规则也有计数延迟，两层均不承诺每日额度硬上限。
+
+CI 同时维护部署区域的 `Always Use HTTPS` 与 HSTS（180 天，含子域），HTTP 请求在边缘升级到 HTTPS；Worker 另对 `/`、`/index.html` 和 `/login.html` 的明文导航返回 308，本地回环地址与内网 IP 除外。API 请求不在 Worker 内做跨协议跳转，避免 `credentials: 'same-origin'` 在跳转后丢失 Cookie。网页 Cookie 带 `Secure`，明文页面既不会发送也不会被允许覆盖它，因此登录和退出都只在 HTTPS 下工作。
 
 OAuth 提供资源与授权服务器发现、动态客户端注册、S256 PKCE 授权码、刷新令牌轮换及撤销。客户端连接 `/mcp` 后通过浏览器明确同意授权；访问令牌有效期 1 小时，授权最多保留 30 天，客户端注册有效期 1 年。授权码有效期 5 分钟且只能兑换一次；重复使用刷新令牌会撤销该授权，客户端应串行续期。令牌绑定连接时的域名、MCP 地址、工作空间及客户端，令牌不能跨域名使用；OAuth 令牌用于 REST 与 MCP，保持 AI 权限与客户端审计身份，不能调用网页专属接口。鉴权表仅保存随机凭证摘要，不保存明文授权码、访问令牌、刷新令牌或客户端密钥；网页登录密码仍由 Secret 配置。公开注册与授权入口限流，过期记录按索引限量清理。
 
@@ -159,9 +161,9 @@ AI 查询使用只读排序键游标，不创建或清理持久快照。每页�
 
 需要更新 CI 凭证时，`node tools/setup-ci-secrets.mjs` 可将 `.dev.vars` 中对应值提交到 GitHub Secrets，不输出凭证；目标仓库默认 `teamilkman/case-notes`，可用 `CI_REPO` 覆盖。Cloudflare 账户管理凭证与日志应用令牌用途不同。部署地址与标识同样按 Secret 处理：CI 运行时把它们渲染进 `wrangler.jsonc`，输出日志中的取值会被 GitHub 掩码成 `***`。运行时登录密码只在提供了 `WEB_PASSWORD` 时才重新同步，未提供时保留云端现有值。
 
-`CLOUDFLARE_API_TOKEN` 还需部署区域的 `Zone WAF Edit`、账号 `Account Analytics Read` 和 `Notifications Write` 权限，用于边缘规则及 Cloudflare 原生提醒的配置、查询预览和回读核验；缺少权限时 CI 明确失败，不将防护记为已启用。`RESOURCE_GUARD_TOKEN` 不需要 Worker 部署、通知发送或 D1 权限。CI 将既有账号、区域、域名标识分别写入 Worker 的 `GUARD_ACCOUNT_ID`、`GUARD_ZONE_ID`、`GUARD_HOSTNAME` Secret，不提交标识取值。部署时同步定时任务和原生提醒；线上核验识别自动冷却，暂停期间验证边缘拦截及网页正常访问，不为核验而解除冷却。
+`CLOUDFLARE_API_TOKEN` 还需部署区域的 `Zone WAF Edit`、`Zone Settings Edit`、账号 `Account Analytics Read` 和 `Notifications Write` 权限，用于边缘规则、HTTPS 强制及 Cloudflare 原生提醒的配置、查询预览和回读核验；缺少权限时 CI 明确失败，不将防护记为已启用。`RESOURCE_GUARD_TOKEN` 不需要 Worker 部署、通知发送或 D1 权限。CI 将既有账号、区域、域名标识分别写入 Worker 的 `GUARD_ACCOUNT_ID`、`GUARD_ZONE_ID`、`GUARD_HOSTNAME` Secret，不提交标识取值。部署时同步定时任务和原生提醒；线上核验识别自动冷却，暂停期间验证边缘拦截及网页正常访问，不为核验而解除冷却。
 
-线上核验先检查默认地址和版本预览地址均已关闭，仅在自定义域名用网页密码换取一个 OAuth 令牌，再覆盖 OAuth 发现挑战与元数据、MCP 初始化说明与 OpenAPI 描述的同源一致性、工具发现与调用、登录/退出、未认证拒绝、网页数据库列表及出现续页时的游标读取；搜索限定事务，以小页长分别核验 REST 和 MCP 的只读分页，不向正式日志写测试记录。OAuth 授权、兑换、续期与撤销在隔离 Miniflare/D1 测试中核验。识别到每日 D1 额度错误后停止即时重试，接口返回明确错误和 UTC 重置时刻。以对应提交的 CI 结果判断是否已部署，不把本地构建成功当作上线成功。
+线上核验先检查默认地址和版本预览地址均已关闭，仅在自定义域名用网页密码换取一个 OAuth 令牌，再覆盖 HTTPS 强制与 HSTS 回读、OAuth 发现挑战与元数据、MCP 初始化说明与 OpenAPI 描述的同源一致性、工具发现与调用、登录/退出、未认证拒绝、网页数据库列表及出现续页时的游标读取；搜索限定事务，以小页长分别核验 REST 和 MCP 的只读分页，不向正式日志写测试记录。OAuth 授权、兑换、续期与撤销在隔离 Miniflare/D1 测试中核验。识别到每日 D1 额度错误后停止即时重试，接口返回明确错误和 UTC 重置时刻。以对应提交的 CI 结果判断是否已部署，不把本地构建成功当作上线成功。
 
 ## 数据保护与备份
 

@@ -40,7 +40,7 @@ async function grant(){const client=await register(),{code}=await approve(client
 before(async()=>{
   mf=new Miniflare(convertV4MiniflareOptions({name:'oauth-tests',modules:true,scriptPath:resolve('dist/worker.js'),compatibilityDate:'2026-10-01',compatibilityFlags:['nodejs_compat'],telemetry:{enabled:false},resourcePersistencePath:temp,
     d1Databases:{DB:'business'},bindings:{WEB_PASSWORD:'synthetic-password'},ratelimits:testRateLimits,
-    assets:{directory:resolve('public'),binding:'ASSETS',run_worker_first:['/api/*','/mcp','/health','/oauth/*','/.well-known/*'],routerConfig:{has_user_worker:true}}}));
+    assets:{directory:resolve('public'),binding:'ASSETS',run_worker_first:['/','/index.html','/login.html','/api/*','/mcp','/health','/oauth/*','/.well-known/*'],routerConfig:{has_user_worker:true}}}));
   auth=await mf.getD1Database('DB') as unknown as D1Database;
   for(const [db,folder] of [[auth,'migrations/business']] as const)
     for(const file of readdirSync(folder).filter(f=>f.endsWith('.sql')).sort())await db.batch(migrationSql(resolve(folder,file)).map(sql=>db.prepare(sql)));

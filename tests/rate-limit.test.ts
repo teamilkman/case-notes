@@ -53,7 +53,7 @@ test('AI limits share a stable client bucket across transports and token rotatio
 test('real isolated Miniflare rate-limit counters share dynamic paths, separate source IPs, and leave assets usable',async()=>{
   const mf=new Miniflare(convertV4MiniflareOptions({modules:true,scriptPath:resolve('dist/worker.js'),compatibilityDate:'2026-10-01',compatibilityFlags:['nodejs_compat'],telemetry:{enabled:false},
     ratelimits:{API_RATE_LIMITER:{namespace_id:'1',simple:{limit:2,period:60}},AI_RATE_LIMITER:{namespace_id:'2',simple:{limit:2,period:60}},AUTH_RATE_LIMITER:{namespace_id:'3',simple:{limit:2,period:60}}},
-    assets:{directory:resolve('public'),binding:'ASSETS',run_worker_first:['/api/*','/health','/mcp'],routerConfig:{has_user_worker:true}}}));
+    assets:{directory:resolve('public'),binding:'ASSETS',run_worker_first:['/','/index.html','/login.html','/api/*','/health','/mcp'],routerConfig:{has_user_worker:true}}}));
   const read=(path:string,ip='192.0.2.1')=>mf.dispatchFetch('https://synthetic.example'+path,{headers:{'CF-Connecting-IP':ip}});
   try{
     assert.equal((await read('/health')).status,200);

@@ -24,7 +24,7 @@ async function fixture(run:(source:D1Database,target:D1Database,mf:Miniflare)=>P
   }finally{await mf.dispose();assert.ok(dir.startsWith(resolve(tmpdir(),'case-notes-auth-merge-')));rmSync(dir,{recursive:true});}
 }
 async function seed(source:D1Database){
-  const now=Date.now(),expiry=now+86400_000;
+  const now=Date.now(),expiry=now+30*86400_000;
   await source.batch([
     source.prepare('INSERT INTO web_sessions VALUES(?,?,?,?)').bind(await sha256('synthetic-cookie'),'personal',new Date(expiry).toISOString(),new Date(now).toISOString()),
     source.prepare("INSERT INTO login_attempts SELECT 'bucket-'||printf('%04d',key),key,? FROM json_each(?)").bind(now,JSON.stringify(Array(205).fill(0))),

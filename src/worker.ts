@@ -42,6 +42,14 @@ export default {
   async fetch(request:Request,env:Env,ctx:ExecutionContext):Promise<Response> {
     const url=new URL(request.url),path=url.pathname;
     try {
+      // A shell or login page opened over plain HTTP must reach HTTPS before it
+      // can sign in: Secure cookies are not sent over HTTP, and browsers refuse
+      // to replace an existing Secure cookie from an insecure response. API
+      // fetches are not redirected here because credentials:'same-origin' would
+      // be dropped across a scheme change; Always Use HTTPS upgrades those.
+      const host=url.hostname,localHost=host==='localhost'||host==='[::1]'||/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host);
+      if(url.protocol==='http:'&&!localHost&&(path==='/'||path==='/index.html'||path==='/login.html'))
+        return Response.redirect(url.href.replace(/^http:/,'https:'),308);
       // Stateless JSON RPC offers no server-initiated SSE stream. Returning 200
       // then closing the stream makes clients reconnect forever, even when idle.
       if(path==='/mcp'&&request.method!=='POST')return json({jsonrpc:'2.0',id:null,error:{code:-32000,message:'Method not allowed; use POST.'}},405,{Allow:'POST'});
@@ -55,6 +63,8 @@ export default {
       }
       if(path.startsWith('/api/')||path==='/mcp') {
         const p=await authenticate(request,env);
+        const refreshed=p.webSession?.cookieRefresh??[];
+        const reply=(response:Response)=>{for(const cookie of refreshed)response.headers.append('Set-Cookie',cookie);return response;};
         if(p.source==='web'&&request.method!=='GET')checkOrigin(request);
         await limitPrincipal(env,p);
         if(path==='/mcp') {
@@ -67,22 +77,22 @@ export default {
           const response=json(success({workspace:p.workspaceId,source:p.source,
             ...(p.webSession?{cache_scope:p.webSession.cacheScope,expires_at:p.webSession.expiresAt,
               change_token:await changeToken(env,p.workspaceId)}:{})}));
-          for(const cookie of p.webSession?.cookieUpgrade??[])response.headers.append('Set-Cookie',cookie);return response;
+          for(const cookie of [...(p.webSession?.cookieRefresh??[]),...(p.webSession?.cookieUpgrade??[])])response.headers.append('Set-Cookie',cookie);return response;
         }
-        if(path.startsWith('/api/v1/')&&request.method==='POST')return json(await executeTool(env,p,path.slice('/api/v1/'.length),await body(request)));
+        if(path.startsWith('/api/v1/')&&request.method==='POST')return reply(json(await executeTool(env,p,path.slice('/api/v1/'.length),await body(request))));
         if(path==='/api/holidays'&&request.method==='GET'){
           const raw=url.searchParams.get('year')??'',year=Number(raw);
           if(!/^\d{4}$/.test(raw)||!Number.isInteger(year))throw new AppError('INVALID_ARGUMENT','year 须为四位年份。',null,400);
-          return json(success(await holidayCalendar(year,ctx)));
+          return reply(json(success(await holidayCalendar(year,ctx))));
         }
-        if(path==='/api/web/complete-todo'&&request.method==='POST')return json(await completeTodo(env,p,validated(webTodo,await body(request))));
-        if(path==='/api/web/save-notes'&&request.method==='POST')return json(await saveNotes(env,p,validated(webNotesSchema,await body(request))));
-        if(path.startsWith('/api/web/')&&request.method==='POST')return json(await webRead(env,p,path.slice('/api/web/'.length),await body(request)));
+        if(path==='/api/web/complete-todo'&&request.method==='POST')return reply(json(await completeTodo(env,p,validated(webTodo,await body(request)))));
+        if(path==='/api/web/save-notes'&&request.method==='POST')return reply(json(await saveNotes(env,p,validated(webNotesSchema,await body(request)))));
+        if(path.startsWith('/api/web/')&&request.method==='POST')return reply(json(await webRead(env,p,path.slice('/api/web/'.length),await body(request))));
         if(path==='/api/web/history'&&request.method==='GET') {
           if(p.source!=='web')throw new AppError('PERMISSION_DENIED','操作历史通过网页查看。',null,403);
           const c=await resolveCase(env,p,url.searchParams.get('case_ref')??'');
           const history=await env.DB.prepare('SELECT action,source,before_json,after_json,created_at,line_id FROM audit_changes WHERE workspace_id=? AND case_id=? ORDER BY created_at DESC,id DESC LIMIT 100').bind(p.workspaceId,c.id).all();
-          return json(success({items:history.results}));
+          return reply(json(success({items:history.results})));
         }
         throw new AppError('INVALID_ARGUMENT','接口或 HTTP 方法不存在。',null,404);
       }

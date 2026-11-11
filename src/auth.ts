@@ -1,10 +1,11 @@
 import { AppError, sha256, type Env, type Principal } from './types';
 import { authenticateOAuth } from './oauth';
 import {previousSessionCookie} from './legacy-identifiers';
-const COOKIE='case_notes_session';
+const COOKIE='case_notes_session',SESSION_SECONDS=30*86400,RENEW_BEFORE_SECONDS=15*86400;
 function cookies(request:Request){return request.headers.get('Cookie')?.split(';').map(x=>x.trim())??[];}
 function cookieValue(request:Request,name:string){return cookies(request).find(x=>x.startsWith(`${name}=`))?.slice(name.length+1);}
 function cookieFlags(request:Request){return `; HttpOnly; SameSite=Strict; Path=/${new URL(request.url).protocol==='https:'?'; Secure':''}`;}
+function sessionCookie(request:Request,token:string,seconds:number){return `${COOKIE}=${token}; Max-Age=${Math.max(0,Math.floor(seconds))}${cookieFlags(request)}`;}
 async function equalSecret(a:string,b:string) {
   const [x,y]=await Promise.all([sha256(a),sha256(b)]);let diff=0;
   for(let i=0;i<x.length;i++)diff|=x.charCodeAt(i)^y.charCodeAt(i);return diff===0;
@@ -19,10 +20,24 @@ export async function authenticate(request:Request,env:Env):Promise<Principal> {
   const current=cookieValue(request,COOKIE),cookie=current??cookieValue(request,previousSessionCookie);
   if(cookie){const session=await env.DB.prepare('SELECT * FROM web_sessions WHERE token_hash=? AND workspace_id=? AND expires_at>?')
     .bind(await sha256(cookie),workspaceId,new Date().toISOString()).first();
-    if(session)return {workspaceId,clientId:'web',actorId:'owner',source:'web',webSession:{
-      cacheScope:await sha256(`browser-cache-v1:${workspaceId}:${cookie}`),expiresAt:String(session.expires_at),
-      ...(!current?{cookieUpgrade:[`${COOKIE}=${cookie}; Max-Age=${Math.max(0,Math.floor((Date.parse(String(session.expires_at))-Date.now())/1000))}${cookieFlags(request)}`,
-        `${previousSessionCookie}=; Max-Age=0${cookieFlags(request)}`]}:{})}};}
+    if(session){
+      const now=Date.now();
+      let expiresAt=Date.parse(String(session.expires_at)),renewed=false;
+      if(!Number.isFinite(expiresAt))throw new AppError('UNAUTHORIZED','请先登录。',null,401);
+      // Sliding lifetime: active visitors are not forced to sign in again at
+      // the original 30-day mark. Renew at most once per remaining half-life,
+      // and keep the token so the cache scope and other tabs stay unchanged.
+      if(expiresAt-now<RENEW_BEFORE_SECONDS*1000){
+        const next=new Date(now+SESSION_SECONDS*1000).toISOString();
+        await env.DB.prepare('UPDATE web_sessions SET expires_at=? WHERE token_hash=?').bind(next,session.token_hash).run();
+        expiresAt=Date.parse(next);renewed=true;
+      }
+      const cookieLine=sessionCookie(request,cookie,(expiresAt-now)/1000);
+      return {workspaceId,clientId:'web',actorId:'owner',source:'web',webSession:{
+        cacheScope:await sha256(`browser-cache-v1:${workspaceId}:${cookie}`),expiresAt:new Date(expiresAt).toISOString(),
+        ...(current&&renewed?{cookieRefresh:[cookieLine]}:{}),
+        ...(!current?{cookieUpgrade:[cookieLine,`${previousSessionCookie}=; Max-Age=0${cookieFlags(request)}`]}:{})}};
+    }}
   throw new AppError('UNAUTHORIZED','请先登录。',null,401);
 }
 export function checkOrigin(request:Request) {
@@ -36,10 +51,10 @@ export async function login(request:Request,env:Env,body:any) {
   const token=crypto.randomUUID()+crypto.randomUUID();
   await env.DB.batch([
     env.DB.prepare('DELETE FROM web_sessions WHERE expires_at<?').bind(time),
-    env.DB.prepare('INSERT INTO web_sessions VALUES(?,?,?,?)').bind(await sha256(token),env.WORKSPACE_ID??'personal',new Date(Date.now()+30*86400_000).toISOString(),time),
+    env.DB.prepare('INSERT INTO web_sessions VALUES(?,?,?,?)').bind(await sha256(token),env.WORKSPACE_ID??'personal',new Date(Date.now()+SESSION_SECONDS*1000).toISOString(),time),
     env.DB.prepare('DELETE FROM login_attempts WHERE bucket=?').bind(bucket),
   ]);
-  return `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000${new URL(request.url).protocol==='https:'?'; Secure':''}`;
+  return sessionCookie(request,token,SESSION_SECONDS);
 }
 export async function limitAttempts(request:Request,env:Env,namespace:string,limit:number) {
   const ip=request.headers.get('CF-Connecting-IP')??'local',bucket=await sha256(namespace+ip),clock=Date.now(),reset=clock+15*60_000;
